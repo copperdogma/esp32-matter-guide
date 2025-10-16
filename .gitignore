@@ -1,0 +1,114 @@
+# ESP32-Matter-Guide .gitignore
+# 
+# This repository contains documentation and patches for setting up ESP32-C3 Matter devices.
+# We do NOT commit build artifacts, credentials, or local firmware builds.
+
+# =============================================================================
+# FIRMWARE BUILD DIRECTORIES (users create these locally following the guide)
+# =============================================================================
+my_occupancy_sensor/
+firmware/
+temp-matter-occupancy-sensor/
+
+# =============================================================================
+# BUILD ARTIFACTS & BINARIES
+# =============================================================================
+build/
+*.bin
+*.elf
+*.map
+*.o
+*.obj
+*.a
+*.so
+
+# ESP-IDF specific
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# =============================================================================
+# CREDENTIALS & CERTIFICATES (NEVER commit these - security sensitive!)
+# =============================================================================
+*.pem
+*.der
+*.key
+*_key.*
+*_cert.*
+*PAA*
+*PAI*
+*DAC*
+*CD.der
+
+# Factory partition data (contains unique device credentials)
+131b_1234/
+*-partition.bin
+partition_fixed.bin
+*onb_codes.csv
+*qrcode.png
+
+# Manufacturing data
+cn_dacs-*.csv
+summary-*.csv
+staging/
+
+# =============================================================================
+# SERIAL OUTPUT & LOGS
+# =============================================================================
+# Ignore all .txt files except specific ones
+*.txt
+!patches/*.txt
+!README.txt
+!boot_capture.txt
+
+# But ignore these specific logs
+serial_output*.txt
+idf_monitor_output.txt
+cu_serial_output.txt
+screen_capture.txt
+firmware/boot_capture.txt
+my_occupancy_sensor/boot_capture.txt
+
+# =============================================================================
+# TEMPORARY & RESEARCH FILES
+# =============================================================================
+deep-research/
+scratchpad.md
+capture_serial.exp
+
+# CSV files (mostly credentials or temp data)
+*.csv
+!partitions.csv
+
+# =============================================================================
+# EDITOR & IDE
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# =============================================================================
+# WHAT SHOULD BE COMMITTED:
+# - SETUP-GUIDE.md (main documentation)
+# - PROVISIONING.md (documentation)
+# - esp32-matter-guide.md (documentation)  
+# - patches/ (bug fixes for ESP-Matter)
+# - PATCH-SUMMARY.md (patch documentation)
+# - README.md (repository overview - TO BE CREATED)
+# - .gitignore (this file)
+# =============================================================================
+
