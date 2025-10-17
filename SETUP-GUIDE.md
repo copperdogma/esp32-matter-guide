@@ -343,12 +343,23 @@ chip-cert gen-att-cert --type d --subject-cn "Matter DAC" --subject-vid 0x131B -
 chip-cert gen-cd --key PAA_key.pem --cert PAA_cert.pem --out CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330001-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
 
 # Generate factory partition
-# ⚠️ CRITICAL: The QR code is derived from passcode + discriminator
-# If building MULTIPLE devices, use UNIQUE values for each device:
-#   - Passcode range: 00000001-99999998 (avoid patterns like 12345678)
-#   - Discriminator range: 0x000-0xFFF (0-4095 decimal)
-# Using the same values will create identical QR codes!
-esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF00 --dac-cert DAC_cert.pem --dac-key DAC_key.pem --pai --cert PAI_cert.pem --key PAI_key.pem --cert-dclrn CD.der --outdir .
+# ⚠️ CRITICAL: Choose UNIQUE passcode and discriminator for THIS device!
+# The QR code is derived from these values - using the same values creates duplicate QR codes.
+# 
+# CHOOSE YOUR OWN VALUES (don't use these examples as-is):
+#   Passcode: Pick a random 8-digit number (00000001-99999998, avoid patterns)
+#   Discriminator: Pick a random hex value (0x000-0xFFF / 0-4095 decimal)
+#
+# Examples for different devices:
+#   Device 1: --passcode 20202021 --discriminator 0xF00
+#   Device 2: --passcode 34567890 --discriminator 0x800
+#   Device 3: --passcode 87654321 --discriminator 0x123
+#
+# Replace the values below with YOUR chosen values:
+PASSCODE=20202021      # ⚠️ CHANGE THIS to your unique 8-digit number
+DISCRIMINATOR=0xF00    # ⚠️ CHANGE THIS to your unique hex value
+
+esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode $PASSCODE --discriminator $DISCRIMINATOR --dac-cert DAC_cert.pem --dac-key DAC_key.pem --pai --cert PAI_cert.pem --key PAI_key.pem --cert-dclrn CD.der --outdir .
 ```
 
 ### Step 5: Add pin-code to Factory Partition
@@ -359,10 +370,10 @@ ls -la 131b_1234/
 UUID="<your-uuid-from-above>"  # Replace with actual UUID from ls output
 
 # Add pin-code to factory partition CSV using sed
-# ⚠️ IMPORTANT: The pin-code value MUST match the --passcode from Step 4
-# Default example uses 20202021 - change this if you used a different passcode
+# ⚠️ IMPORTANT: Use the SAME passcode value you chose in Step 4
+# This MUST match the PASSCODE variable from Step 4
 sed -i.bak '/discriminator,data,u32,/a\
-pin-code,data,u32,20202021' 131b_1234/$UUID/internal/partition.csv
+pin-code,data,u32,'"$PASSCODE" 131b_1234/$UUID/internal/partition.csv
 
 # Verify the pin-code was added (should show the pin-code line)
 grep "pin-code" 131b_1234/$UUID/internal/partition.csv
