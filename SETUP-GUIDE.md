@@ -18,9 +18,11 @@
 - Verified process for changing device QR codes
 - Comprehensive troubleshooting for common issues
 
+**📝 macOS Serial Port Note**: On macOS, use `/dev/cu.usbmodem101` for flashing/writing (esptool) and `/dev/tty.usbmodem101` for monitoring (idf.py monitor). The `cu` (call-up) device allows non-blocking writes, while `tty` is for terminal interaction.
+
 ---
 
-## ✅ SUCCESS SUMMARY (October 16, 2025)
+## ✅ SUCCESS SUMMARY (October 17, 2025)
 
 The ESP32-C3 Matter occupancy sensor is now **fully functional** with unique credentials:
 
@@ -42,22 +44,6 @@ The ESP32-C3 Matter occupancy sensor is now **fully functional** with unique cre
 ```bash
 # Initialize ESP-IDF and ESP-Matter environments
 cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export.sh && export IDF_CCACHE_ENABLE=1
-```
-
-### 0. Check for Upstream Patches (REQUIRED FIRST STEP)
-```bash
-# CRITICAL: Check if ESP-Matter bugs have been fixed upstream
-# This prevents applying unnecessary patches to already-fixed code
-
-echo "Checking ESP32FactoryDataProvider for GetSetupPasscode bug..."
-if grep "GetSetupPasscode.*override" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.h | grep -q "CHIP_ERROR_NOT_IMPLEMENTED"; then
-    echo "⚠️  BUG CONFIRMED: GetSetupPasscode returns NOT_IMPLEMENTED"
-    echo "📋 Patch REQUIRED: Apply patches/esp32-factory-data-provider-getsetuppasscode.patch"
-else
-    echo "✅ BUG FIXED: GetSetupPasscode is properly implemented!"
-    echo "🎉 NO PATCH NEEDED - Skip patch application step"
-    echo "📝 UPDATE REQUIRED: SETUP-GUIDE.md should be updated to remove patch"
-fi
 ```
 
 ### 1. Complete Chip Erase
@@ -83,27 +69,20 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/
 ```
 
 ### Using the Template Firmware
-- **What it is**: A minimal, working ESP-Matter firmware configured as a PIR occupancy sensor, verified to build/flash/boot. Use it as a starting point for any device type.
-- **Location**: `templates/occupancy-sensor/` in this repository
-- **How to use**:
-  1) Copy the template to start a new project:
-     ```bash
-     cp -r templates/occupancy-sensor ~/esp/projects/my_new_matter_device
-     cd ~/esp/projects/my_new_matter_device
-     ```
-  2) Set target and build:
-     ```bash
-     idf.py set-target esp32c3 && idf.py build
-     ```
-  3) Flash and monitor (replace port if needed):
-     ```bash
-     idf.py -p /dev/cu.usbmodem101 flash
-     idf.py -p /dev/tty.usbmodem101 monitor
-     ```
-- **Switching to another Matter device type**:
-  - Replace the endpoint creation in `main/app_main.cpp` from the provided occupancy sensor to another device type using ESP-Matter APIs (e.g., on/off light, contact sensor). See ESP-Matter examples in `~/esp/esp-matter/examples/` for the target device, then mirror its `endpoint::create(...)` usage and cluster attributes.
-  - Keep `sdkconfig` production credentials and partition layout unchanged.
-  - Rebuild and flash.
+**Location**: `templates/occupancy-sensor/` - Minimal working PIR occupancy sensor firmware (can adapt to any device type)
+
+```bash
+# Copy template and build
+cp -r templates/occupancy-sensor ~/esp/my_matter_device
+cd ~/esp/my_matter_device
+idf.py set-target esp32c3 && idf.py build
+
+# Flash and monitor
+idf.py -p /dev/cu.usbmodem101 flash
+idf.py -p /dev/tty.usbmodem101 monitor
+```
+
+**To change device type**: Replace `endpoint::create()` in `main/app_main.cpp` with your target device (see `~/esp/esp-matter/examples/` for reference). Keep sdkconfig credentials unchanged.
 
 ### 3. Monitor Serial Output
 ```bash
@@ -165,96 +144,32 @@ Notes:
 - Ensure CHIP includes are available so `app/server/OnboardingCodesUtil.h` resolves (matches the temp template project).
 - Rebuild and flash; the serial log will show the QR string (`MT:...`) and manual code.
 
-### ✅ QR Code Issue RESOLVED (October 16, 2025)
+### Known Issue: QR Code Not Printing (GetSetupPasscode Bug)
 
-**⚠️ UPSTREAM BUG CONFIRMED**: As of October 2025, the ESP-Matter repository has an incomplete implementation in `ESP32FactoryDataProvider`. The `GetSetupPasscode()` function returns `CHIP_ERROR_NOT_IMPLEMENTED`, and `esp-matter-mfg-tool` omits the `pin-code` NVS entry. This causes QR code generation to fail with error `2d` (PERSISTED_STORAGE_VALUE_NOT_FOUND).
+**Symptom**: QR code fails to generate with error `2d` (PERSISTED_STORAGE_VALUE_NOT_FOUND)
 
-**🔍 CHECK BEFORE APPLYING PATCH**:
-Before applying the patch below, verify if the issue still exists:
+**Root Cause**: As of October 2025, ESP-Matter's `ESP32FactoryDataProvider::GetSetupPasscode()` returns `CHIP_ERROR_NOT_IMPLEMENTED`, and `esp-matter-mfg-tool` omits the `pin-code` NVS entry.
 
+**Check if bug is fixed** (run this first - covered in Step 2):
 ```bash
-# Check if GetSetupPasscode returns NOT_IMPLEMENTED
 if grep "GetSetupPasscode.*override" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.h | grep -q "CHIP_ERROR_NOT_IMPLEMENTED"; then
-    echo "BUG EXISTS - Apply patch"
+    echo "⚠️  Bug exists - follow fix below"
 else
-    echo "BUG FIXED - Skip patch!"
+    echo "✅ Bug fixed upstream - skip this section!"
 fi
 ```
 
-**⚠️ IF BUG IS FIXED UPSTREAM**: The patch is no longer needed! Alert the user:
-```
-🎉 GOOD NEWS: ESP-Matter has fixed the GetSetupPasscode bug upstream!
-The patch in patches/esp32-factory-data-provider-getsetuppasscode.patch is NO LONGER NEEDED.
-
-ACTION REQUIRED:
-1. Do NOT apply the patch
-2. Update SETUP-GUIDE.md to remove patch instructions
-3. Delete patches/esp32-factory-data-provider-getsetuppasscode.patch
-4. You can now use factory data providers without modifications!
-```
-
----
-
-**IF BUG STILL EXISTS** (apply patch):
-
-**Root Cause**: ESP32FactoryDataProvider's `GetSetupPasscode()` returns `CHIP_ERROR_NOT_IMPLEMENTED`. The QR code generator requires the actual setup passcode, causing generation to fail.
-
-**Solution - Apply Patch**:
-
-1. **Apply the patch** (from esp-matter root):
-   ```bash
-   cd ~/esp/esp-matter
-   patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch
+**Fix** (if bug exists):
+1. Apply patch: `cd ~/esp/esp-matter && patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch`
+2. After running `esp-matter-mfg-tool`, edit `131b_1234/<UUID>/internal/partition.csv` and add:
    ```
-
-2. **Verify patch applied successfully**:
-   ```bash
-   # Should show the implementation, NOT "CHIP_ERROR_NOT_IMPLEMENTED"
-   grep -A 3 "GetSetupPasscode.*setupPasscode)" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.cpp
+   pin-code,data,u32,20202021
    ```
+   (right after the `discriminator` line, using your actual passcode)
+3. Regenerate partition: `python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate partition.csv partition_fixed.bin 0x6000`
+4. Rebuild, flash firmware, and flash factory partition
 
-3. **Add pin-code to factory partition CSV** (after esp-matter-mfg-tool generation):
-   ```csv
-   chip-factory,namespace,,
-   discriminator,data,u32,3840
-   pin-code,data,u32,20202021          # ← ADD THIS (use your actual passcode)
-   iteration-count,data,u32,10000
-   salt,data,string,qmqmzOZyEwdzYdVGQ6Uu9CLK/EqONB9OD3ILHX2uiSQ=
-   verifier,data,string,kjCQe/05BKFiHeqWhUyHPKMenVKnqb+JYNmEfVCavnsERxIgSP/6vgOGGLt4qs8A+SVHgenXdnc48thnNcvgVxfQMuVVHFpVJuo1Pr/ujn58ilEwdGuTpDzPJbT7k6nQvg==
-   ```
-
-4. **Regenerate factory partition**:
-   ```bash
-   python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate \
-     partition.csv partition_fixed.bin 0x6000
-   ```
-
-5. **Rebuild and flash**:
-   ```bash
-   idf.py build
-   idf.py -p /dev/cu.usbmodem101 flash
-   esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 partition_fixed.bin
-   ```
-
-**Expected Output** (QR code now prints):
-```
-I (1390) chip[SVR]: SetupQRCode: [MT:Y.K90GSY00KA0648G00]
-I (1400) chip[SVR]: Copy/paste the below URL in a browser to see the QR Code:
-I (1410) chip[SVR]: https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.K90GSY00KA0648G00
-I (1420) chip[SVR]: Manual pairing code: [34970112332]
-```
-
-**NVS Key Names for ESP32** (confirmed from ESP32Config.cpp):
-- `discriminator` → Setup discriminator (u32)
-- `pin-code` → Setup passcode (u32) ← **REQUIRED for QR code**
-- `iteration-count` → SPAKE2+ iteration count (u32)
-- `salt` → SPAKE2+ salt (string, base64)
-- `verifier` → SPAKE2+ verifier (string, base64)
-- All in `chip-factory` namespace
-
-**To Report Upstream**: If this bug still exists when you're reading this, please report to:
-- https://github.com/espressif/esp-matter/issues
-- Reference: ESP32FactoryDataProvider::GetSetupPasscode() returns NOT_IMPLEMENTED, breaking QR code generation
+**Expected Result**: QR code and manual pairing code now print in serial output
 
 ### 4. Generate Credentials (Complete Workflow)
 ```bash
@@ -397,17 +312,13 @@ esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF0
 ### Step 5: Add pin-code to Factory Partition
 
 ```bash
-# Find the generated UUID
+# Find the generated UUID directory
 ls -la 131b_1234/
-
-# Add pin-code to the CSV (replace <UUID> with actual UUID)
 UUID="<your-uuid-from-above>"
-echo "Adding pin-code to partition CSV..."
 
-# Edit the file to add pin-code line after discriminator
-# Manually edit 131b_1234/$UUID/internal/partition.csv and add:
-# pin-code,data,u32,20202021
-# (right after the discriminator line)
+# Manually edit 131b_1234/$UUID/internal/partition.csv
+# Add this line after discriminator:
+#   pin-code,data,u32,20202021
 
 # Regenerate factory partition binary
 python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate 131b_1234/$UUID/internal/partition.csv 131b_1234/$UUID/partition_fixed.bin 0x6000
