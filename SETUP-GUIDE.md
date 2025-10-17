@@ -238,6 +238,9 @@ git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git
 cd esp-idf
 ./install.sh esp32c3
 
+# IMPORTANT: Ensure all submodules are initialized (--recursive flag sometimes misses some)
+git submodule update --init --recursive
+
 # Clone ESP-Matter
 cd ~/esp
 git clone --depth 1 https://github.com/espressif/esp-matter.git
@@ -247,6 +250,11 @@ cd connectedhomeip/connectedhomeip
 ./scripts/checkout_submodules.py --platform esp32 darwin --shallow
 cd ../..
 ./install.sh
+
+# macOS-specific workaround: If install.sh fails with "externally-managed-environment" error
+# This is due to macOS/Python PEP 668 restrictions on newer macOS versions
+# Run this if you see that error:
+pip3 install --break-system-packages -r connectedhomeip/connectedhomeip/scripts/setup/requirements.build.txt
 ```
 
 ### Step 2: Check and Apply Upstream Patches
@@ -391,6 +399,23 @@ idf.py -p /dev/tty.usbmodem101 monitor
   export IDF_CCACHE_ENABLE=1
   ```
 
+**"error: externally-managed-environment" (macOS)**
+- Cause: macOS Python PEP 668 restrictions on newer systems
+- Symptom: ESP-Matter `./install.sh` fails during Python dependency installation
+- Solution: Install dependencies with override flag:
+  ```bash
+  cd ~/esp/esp-matter
+  pip3 install --break-system-packages -r connectedhomeip/connectedhomeip/scripts/setup/requirements.build.txt
+  ```
+
+**"fatal error: esp_app_desc.h: No such file or directory"**
+- Cause: ESP-IDF submodules not fully initialized
+- Solution: Initialize all submodules explicitly:
+  ```bash
+  cd ~/esp/esp-idf
+  git submodule update --init --recursive
+  ```
+
 ### Certificate Generation Issues
 
 **"Invalid value specified for Certificate Id"**
@@ -421,6 +446,17 @@ idf.py -p /dev/tty.usbmodem101 monitor
   1. Remove conflicting I2C-based endpoints from `app_main.cpp`
   2. The provided template already has SHTC3 removed for this reason
   3. If adding new I2C sensors, ensure all drivers use the same I2C API version
+
+**"At least one of the feature(s) must be supported" - Occupancy Sensor Crash**
+- Cause: Missing feature flag configuration for occupancy sensor cluster
+- Error: `assert failed: ABORT_CLUSTER_CREATE`
+- Symptom: Device crashes during endpoint creation, before QR code prints
+- Solution: The template includes the required feature flag (as of Oct 2025), but if you're creating custom sensors, add:
+  ```cpp
+  occupancy_sensor_config.occupancy_sensing.feature_flags =
+      cluster::occupancy_sensing::feature::passive_infrared::get_id();
+  ```
+  This must be set BEFORE calling `occupancy_sensor::create()`
 
 ### Commissioning Issues
 

@@ -143,6 +143,9 @@ extern "C" void app_main()
         chip::to_underlying(OccupancySensing::OccupancySensorTypeEnum::kPir);
     occupancy_sensor_config.occupancy_sensing.occupancy_sensor_type_bitmap =
         chip::to_underlying(OccupancySensing::OccupancySensorTypeBitmap::kPir);
+    // REQUIRED: Set feature flag for PIR sensor (cluster requires at least one feature)
+    occupancy_sensor_config.occupancy_sensing.feature_flags =
+        cluster::occupancy_sensing::feature::passive_infrared::get_id();
 
     endpoint_t * occupancy_sensor_ep = occupancy_sensor::create(node, &occupancy_sensor_config, ENDPOINT_FLAG_NONE, NULL);
     ABORT_APP_ON_FAILURE(occupancy_sensor_ep != nullptr, ESP_LOGE(TAG, "Failed to create occupancy_sensor endpoint"));
