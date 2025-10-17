@@ -1,6 +1,6 @@
 # ESP32-C3 Matter Occupancy Sensor Setup Guide
 
-**Last Updated**: October 16, 2025  
+**Last Updated**: October 17, 2025  
 **Status**: Complete and Verified  
 **Goal**: Set up ESP32-C3 as a Matter-compatible device that can be reliably commissioned to Apple Home with unique, changeable credentials.
 
@@ -351,12 +351,31 @@ cd ~/esp/esp-idf && source ./export.sh
 cd ~/esp/esp-matter && source ./export.sh
 export IDF_CCACHE_ENABLE=1
 
-# Copy template firmware
-cp -r /path/to/esp32-matter-guide/templates/occupancy-sensor ~/esp/my_matter_device
+# Copy the sensors example from ESP-Matter (includes build infrastructure)
+cp -r ~/esp/esp-matter/examples/sensors ~/esp/my_matter_device
 cd ~/esp/my_matter_device
+
+# Replace with template files (occupancy-only, no I2C conflicts)
+cp /path/to/esp32-matter-guide/templates/occupancy-sensor/app_main.cpp main/
+cp /path/to/esp32-matter-guide/templates/occupancy-sensor/drivers/pir.* main/drivers/
 
 # Configure for ESP32-C3
 idf.py set-target esp32c3
+
+# Configure sdkconfig for production credentials (use menuconfig)
+idf.py menuconfig
+# Navigate to:
+# - "Component config" → "CHIP Device Layer" → "Matter Device Config"
+#   ✓ Enable "ESP32 Factory Data Provider"
+#   ✓ Enable "ESP32 Device Instance Info Provider"  
+# - "Component config" → "CHIP Device Layer" → "Commissioning options"
+#   ✓ Enable "Use Commissioning Data from Factory Partition"
+#   ✗ DISABLE "Enable Test Commissioning Credentials"
+# - "Component config" → "CHIP Device Layer" → "Factory Partition Label"
+#   Set to: "fctry"
+# - "Example Configuration"
+#   Set "PIR Data Pin" to: 3
+# Save and exit menuconfig
 ```
 
 ### Step 4: Generate Unique Device Credentials
@@ -473,6 +492,14 @@ idf.py -p /dev/tty.usbmodem101 monitor
   2. Erase chip completely and reflash
   3. Verify GPIO pin configurations match your hardware
 
+**"CONFLICT! driver_ng is not allowed to be used with this old driver" I2C Error**
+- Cause: Mixing old I2C driver API with new driver API (common with SHTC3 sensor)
+- Symptom: Device boots then immediately crashes in abort() loop
+- Solution: 
+  1. Remove conflicting I2C-based endpoints from `app_main.cpp`
+  2. The provided template already has SHTC3 removed for this reason
+  3. If adding new I2C sensors, ensure all drivers use the same I2C API version
+
 ### Commissioning Issues
 
 **"Fabric already commissioned. Disabling BLE advertisement"**
@@ -548,457 +575,6 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/
 esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
 idf.py -p /dev/tty.usbmodem101 monitor
 ```
-
----
-
-## Development History (Optional Reading)
-
-The following sections document the actual development process, including all attempts, failures, and solutions discovered. These are preserved for historical context and to help understand how issues were diagnosed and resolved. **New users can skip this section.**
-
-### Phase 0: Initialize Documentation & Clean Baseline
-
-### Step 0.1: Complete Chip Erase
-**Purpose**: Clear all NVS, fabrics, and credentials to start from a known clean baseline.
-
-**Command to execute**:
-```bash
-esptool.py --chip esp32c3 -p /dev/tty.usbmodem101 erase_flash
-```
-
-**Status**: 🔄 PENDING - About to execute
-
-**Result**: ❌ FAILED - `esptool.py: command not found`
-
-**Issue**: ESP-IDF environment not initialized. Need to source ESP-IDF export script first.
-
-**Next**: Set up environment, then retry erase.
-
----
-
-## Phase 1: Environment Verification & Setup
-
-### Step 1.1: Initialize Complete Environment (FINAL WORKING COMMAND)
-**Purpose**: Source both ESP-IDF and ESP-Matter export scripts in one command to set up complete build environment.
-
-**Commands to execute**:
-```bash
-# FINAL WORKING COMMAND - Initialize both environments in sequence
-cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export.sh && export IDF_CCACHE_ENABLE=1
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Complete environment initialized:
-- ESP-IDF 5.4 environment activated successfully
-- ESP-Matter environment initialized with ESP_MATTER_PATH set to '/Users/cam/esp/esp-matter'
-- ccache enabled for faster builds
-- Python 3.13.7 detected
-- All tools (esptool.py, chip-cert, esp-matter-mfg-tool) now available
-
-### Step 1.2: Verify Tool Availability
-**Purpose**: Confirm esptool.py, chip-cert, and esp-matter-mfg-tool are available.
-
-**Commands to execute**:
-```bash
-which esptool.py
-which chip-cert
-which esp-matter-mfg-tool
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - All tools available:
-- esptool.py: `/Users/cam/.espressif/python_env/idf5.4_py3.13_env/bin/esptool.py`
-- chip-cert: `/Users/cam/esp/esp-matter/connectedhomeip/connectedhomeip/out/host/chip-cert`
-- esp-matter-mfg-tool: `/Users/cam/.espressif/python_env/idf5.4_py3.13_env/bin/esp-matter-mfg-tool`
-
-### Step 1.3: Retry Complete Chip Erase
-**Purpose**: Now that environment is set up, perform the complete chip erase.
-
-**Commands to execute**:
-```bash
-esptool.py --chip esp32c3 -p /dev/tty.usbmodem101 erase_flash
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Complete chip erase completed successfully in 15.0 seconds.
-- Chip: ESP32-C3 (QFN32) revision v0.4
-- Features: WiFi, BLE, Embedded Flash 4MB (XMC)
-- MAC: 50:78:7d:52:b6:c4
-- All NVS, fabrics, and credentials cleared
-
----
-
-## Phase 2: Build Occupancy Sensor Firmware
-
-### Step 2.1: Check Available Examples
-**Purpose**: Verify that the occupancy sensor example exists in ESP-Matter.
-
-**Commands to execute**:
-```bash
-ls -la ~/esp/esp-matter/examples/
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Found `sensors` example in ESP-Matter. It includes:
-- Temperature sensor (SHTC3) on GPIO 4/5 (I2C)
-- Humidity sensor (SHTC3) on GPIO 4/5 (I2C) 
-- **Occupancy sensor (PIR) on GPIO 7** (needs to be changed to GPIO 3)
-- Creates 3 endpoints: temp (1), humidity (2), occupancy (3)
-
-**Note**: Default PIR GPIO is 7, but our hardware uses GPIO 3. Will need to modify configuration.
-
-### Step 2.2: Create Project Directory
-**Purpose**: Copy the sensors example to our working directory.
-
-**Commands to execute**:
-```bash
-cd /Users/cam/Documents/Projects/esp32-matter-guide
-cp -r ~/esp/esp-matter/examples/sensors ./firmware
-cd firmware
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Sensors example copied to `firmware` directory and navigated to project folder.
-
-### Step 2.3: Set Target and Configure
-**Purpose**: Configure the project for ESP32-C3 and check the configuration.
-
-**Commands to execute**:
-```bash
-idf.py set-target esp32c3
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - ESP32-C3 target set successfully. Project configured with:
-- ESP-IDF 5.4.1 components loaded
-- 30 dependencies resolved
-- Build files generated in `/Users/cam/Documents/Projects/esp32-matter-guide/firmware/build`
-- Some warnings about deprecated CMake versions but build system working
-
-### Step 2.4: Examine Partition Table
-**Purpose**: Check the current partition table to understand memory layout.
-
-**Commands to execute**:
-```bash
-cat partitions.csv
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Partition table analyzed:
-- **nvs**: 0x10000 (48KB) - Regular NVS for operational data
-- **fctry**: 0x3E0000 (24KB) - Factory partition for credentials
-- **ota_0/ota_1**: 0x20000/0x200000 (1.875MB each) - OTA partitions
-- **esp_secure_cert**: 0xd000 (8KB) - Secure certificates
-- **phy_init**: Phy initialization data
-
-**Key Finding**: Factory partition `fctry` is already configured at 0x3E0000 with 24KB size - perfect for our needs!
-
-### Step 2.5: Configure for Production Credentials
-**Purpose**: Configure sdkconfig for production credentials instead of test parameters.
-
-**Commands to execute**:
-```bash
-# Direct sdkconfig edits (instead of interactive menuconfig):
-# - Enable factory data providers
-# - Disable test setup parameters  
-# - Set factory partition to "fctry"
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - sdkconfig updated for production credentials:
-- ✅ Enabled: `CONFIG_ENABLE_ESP32_FACTORY_DATA_PROVIDER=y`
-- ✅ Enabled: `CONFIG_ENABLE_ESP32_DEVICE_INSTANCE_INFO_PROVIDER=y`
-- ✅ Enabled: `CONFIG_FACTORY_DAC_PROVIDER=y`
-- ✅ Enabled: `CONFIG_FACTORY_COMMISSIONABLE_DATA_PROVIDER=y`
-- ✅ Disabled: `CONFIG_ENABLE_TEST_SETUP_PARAMS` (commented out)
-- ✅ Set: `CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="fctry"`
-
-### Step 2.6: Build Firmware
-**Purpose**: Compile the occupancy sensor firmware.
-
-**Commands to execute**:
-```bash
-idf.py build
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Firmware compiled successfully! Key details:
-- **Binary size**: 0x1765e0 bytes (1.52MB) - 22% free space remaining
-- **Generated files**:
-  - `build/bootloader/bootloader.bin` (0x5160 bytes, 58% free)
-  - `build/partition_table/partition-table.bin`
-  - `build/sensors.bin` (main application)
-  - `build/ota_data_initial.bin`
-- **Flash command provided**: Ready for flashing with exact addresses
-- **Warnings**: Some CMake deprecation warnings and symbol conflicts, but build successful
-- **Note**: ✅ GPIO configuration updated - PIR sensor now uses GPIO 3
-
-### Step 2.7: Configure PIR GPIO for GPIO 3
-**Purpose**: Modify the PIR sensor configuration to use GPIO 3 instead of the default GPIO 7.
-
-**Commands to execute**:
-```bash
-# Check current PIR configuration
-grep -r "GPIO.*7" main/ || echo "No GPIO 7 found"
-grep -r "PIR.*GPIO\|GPIO.*PIR" main/ || echo "No PIR GPIO config found"
-
-# Find and modify PIR configuration files
-find main/ -name "*.cpp" -o -name "*.h" | xargs grep -l "pir\|PIR" || echo "No PIR files found"
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - PIR GPIO configuration updated:
-- **Found PIR files**: `main/drivers/pir.cpp`, `main/drivers/pir.h`, `main/app_main.cpp`
-- **Current config**: `CONFIG_PIR_DATA_PIN=7` (default)
-- **Updated to**: `CONFIG_PIR_DATA_PIN=3` (our hardware requirement)
-- **Implementation**: PIR driver uses `CONFIG_PIR_DATA_PIN` macro in `pir.cpp` line 16
-- **Hardware**: PIR sensor will now read from GPIO 3 instead of GPIO 7
-
-### Step 2.8: Rebuild Firmware with Updated GPIO
-**Purpose**: Rebuild the firmware to incorporate the GPIO 3 configuration change.
-
-**Commands to execute**:
-```bash
-idf.py build
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Firmware rebuilt successfully with GPIO 3 configuration:
-- **Binary size**: 0x1765e0 bytes (1.52MB) - 22% free space remaining
-- **Build status**: All components compiled successfully
-- **GPIO config**: PIR sensor now configured for GPIO 3
-- **Ready for flashing**: Complete flash command provided in build output
-
----
-
-## Phase 3: Generate Unique Credentials
-
-### Step 3.1: Generate PAA Certificate
-**Purpose**: Create a Product Attestation Authority (PAA) certificate for our device manufacturer.
-
-**Commands to execute**:
-```bash
-# Generate PAA certificate
-chip-cert gen-att-cert --type a --subject-cn "ESP32-C3 Matter PAA" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key ESP32_C3_Matter_PAA_key.pem --out ESP32_C3_Matter_PAA_cert.pem
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - PAA certificate generated:
-- **PAA Certificate**: `ESP32_C3_Matter_PAA_cert.pem` (615 bytes)
-- **PAA Private Key**: `ESP32_C3_Matter_PAA_key.pem` (227 bytes)
-- **Validity**: 10 years from 2024-01-01
-- **Subject**: "ESP32-C3 Matter PAA"
-
-### Step 3.2: Generate PAI Certificate
-**Purpose**: Create a Product Attestation Intermediate (PAI) certificate signed by our PAA.
-
-**Commands to execute**:
-```bash
-# Generate PAI certificate
-chip-cert gen-att-cert --type i --subject-cn "ESP32-C3 Matter PAI" --subject-vid 0x131B --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAA_key.pem --ca-cert ESP32_C3_Matter_PAA_cert.pem --out-key ESP32_C3_Matter_PAI_key.pem --out ESP32_C3_Matter_PAI_cert.pem
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - PAI certificate generated:
-- **PAI Certificate**: `ESP32_C3_Matter_PAI_cert.pem` (644 bytes)
-- **PAI Private Key**: `ESP32_C3_Matter_PAI_key.pem` (227 bytes)
-- **Vendor ID**: 0x131B (Espressif)
-- **Validity**: 10 years from 2024-01-01
-- **Subject**: "ESP32-C3 Matter PAI"
-
-### Step 3.3: Generate DAC Certificate
-**Purpose**: Create a Device Attestation Certificate (DAC) for our specific device, signed by the PAI.
-
-**Commands to execute**:
-```bash
-# Generate DAC certificate
-chip-cert gen-att-cert --type d --subject-cn "ESP32-C3 Matter DAC" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAI_key.pem --ca-cert ESP32_C3_Matter_PAI_cert.pem --out-key ESP32_C3_Matter_DAC_key.pem --out ESP32_C3_Matter_DAC_cert.pem
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - DAC certificate generated:
-- **DAC Certificate**: `ESP32_C3_Matter_DAC_cert.pem` (696 bytes)
-- **DAC Private Key**: `ESP32_C3_Matter_DAC_key.pem` (227 bytes)
-- **Vendor ID**: 0x131B (Espressif)
-- **Product ID**: 0x1234 (our occupancy sensor)
-- **Validity**: 10 years from 2024-01-01
-- **Subject**: "ESP32-C3 Matter DAC"
-
-### Step 3.4: Generate Certification Declaration (CD)
-**Purpose**: Create a Certification Declaration that certifies our device meets Matter specifications.
-
-**Commands to execute**:
-```bash
-# Generate Certification Declaration (FINAL WORKING COMMAND)
-# NOTE: Certificate ID must be in proper format - tried "ESP32-C3-Occupancy-001", "ESP32C3-001", "12345678" - all failed
-# SUCCESSFUL format: "ZIG20142ZB330001-24"
-chip-cert gen-cd --key ESP32_C3_Matter_PAA_key.pem --cert ESP32_C3_Matter_PAA_cert.pem --out ESP32_C3_Matter_CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330001-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Certification Declaration generated:
-- **CD File**: `ESP32_C3_Matter_CD.der` (235 bytes)
-- **Vendor ID**: 0x131B (Espressif)
-- **Product ID**: 0x1234 (our occupancy sensor)
-- **Device Type**: 0x0107 (Occupancy Sensor)
-- **Certificate ID**: "ZIG20142ZB330001-24"
-- **Security Level**: 0 (Standard)
-- **Certification Type**: 0 (Development and Test)
-
-### Step 3.5: Generate Factory Partition with esp-matter-mfg-tool
-**Purpose**: Create a factory partition binary containing all credentials and device information for flashing to the ESP32-C3.
-
-**Commands to execute**:
-```bash
-# Generate factory partition (FINAL WORKING COMMAND)
-# NOTE: Initial command failed - "generate-factory-partition" is not a valid subcommand
-# SUCCESSFUL command uses direct parameters with correct syntax:
-esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF00 --dac-cert ESP32_C3_Matter_DAC_cert.pem --dac-key ESP32_C3_Matter_DAC_key.pem --pai --cert ESP32_C3_Matter_PAI_cert.pem --key ESP32_C3_Matter_PAI_key.pem --cert-dclrn ESP32_C3_Matter_CD.der --outdir .
-```
-
-**Status**: ✅ COMPLETED
-
-**Result**: SUCCESS - Factory partition generated with unique credentials:
-- **Factory Partition**: `131b_1234/1c9c03d8-e234-4569-aeba-e899bed703c6/1c9c03d8-e234-4569-aeba-e899bed703c6-partition.bin`
-- **QR Code**: `MT:SQU15.GB00KA0648G00`
-- **Manual Code**: `3497-011-2332`
-- **Discriminator**: 3840 (0xF00)
-- **Passcode**: 20202021
-- **Vendor ID**: 0x131B (Espressif)
-- **Product ID**: 0x1234 (our occupancy sensor)
-- **Device Type**: 0x0107 (Occupancy Sensor)
-- **All certificates**: PAA, PAI, DAC, and CD included
-- **Ready for flashing**: Factory partition binary ready for Phase 4
-
----
-
-## Phase 4: Flash & Commission Device
-
-### Step 4.1: Flash Complete Firmware and Factory Data
-**Purpose**: Flash the occupancy sensor firmware and factory partition with unique credentials to the ESP32-C3.
-
-**Commands to execute**:
-```bash
-# Flash complete firmware (bootloader, partition table, app, OTA data)
-idf.py -p /dev/cu.usbmodem101 flash
-
-# Flash factory partition to fctry partition address (0x3E0000)
-esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/1c9c03d8-e234-4569-aeba-e899bed703c6/1c9c03d8-e234-4569-aeba-e899bed703c6-partition.bin
-```
-
-**Status**: ⚠️ PARTIALLY COMPLETED
-
-**Result**: FIRMWARE FLASHED BUT DEVICE NOT VERIFIED WORKING:
-- **Firmware Flash**: All components flashed successfully
-  - Bootloader: 0x0 (20,832 bytes)
-  - Application: 0x20000 (1,533,408 bytes) 
-  - Partition Table: 0xc000 (3,072 bytes)
-  - OTA Data: 0x1d000 (8,192 bytes)
-- **Factory Partition**: Flashed to 0x3E0000 (24,576 bytes)
-- **Device Info**: ESP32-C3 (QFN32) revision v0.4, MAC: 50:78:7d:52:b6:c4
-- **Flash Mode**: DIO, 80MHz, 4MB
-- **⚠️ CRITICAL ISSUE**: Device not responding to esptool commands after flash
-- **⚠️ CRITICAL ISSUE**: No serial output detected - possible boot loop or firmware issue
-- **Status**: NEEDS TROUBLESHOOTING - Device may not be running properly
-
-### Step 4.2: Verify Device Boot and Serial Output
-**Purpose**: CRITICAL - Verify the device actually boots and runs the firmware before attempting commissioning.
-
-**Commands to execute**:
-```bash
-# Method 1: Check if device responds to esptool
-esptool.py --chip esp32c3 -p /dev/tty.usbmodem101 run
-
-# Method 2: Monitor serial output for boot messages
-timeout 10s cat /dev/tty.usbmodem101 || echo "No continuous output (good sign)"
-
-# Method 3: Check for specific boot messages
-timeout 10s grep -i "matter\|esp\|wifi\|ble\|boot" /dev/tty.usbmodem101 || echo "No boot messages detected"
-
-# Method 4: Try to reset and capture boot sequence
-esptool.py --chip esp32c3 -p /dev/tty.usbmodem101 run && timeout 5s cat /dev/tty.usbmodem101
-```
-
-**Status**: ❌ FAILED - CRITICAL ERROR IDENTIFIED
-
-**Result**: CRITICAL ISSUE DETECTED - I2C Driver Conflict:
-- **Root Cause**: `E (462) i2c: CONFLICT! driver_ng is not allowed to be used with this old driver`
-- **Error Location**: `abort() was called at PC 0x420ae579 on core 0`
-- **Boot Sequence**: Device boots successfully but crashes during I2C initialization
-- **Boot Loop**: Device continuously reboots due to this error
-- **Serial Capture**: Successfully captured using `/dev/cu.usbmodem101` (not `/dev/tty.usbmodem101`)
-
-**Technical Details**:
-- Device boots normally through ESP-IDF v5.4.1
-- Partition table loads correctly
-- Heap initialization completes
-- SPI flash detection works
-- **CRASH**: I2C driver conflict causes immediate abort()
-- **REBOOT**: Device automatically reboots and repeats the cycle
-
-**Next Steps**: Fix I2C driver configuration in sdkconfig
-
-**Update (resolved)**: ✅ I2C conflict fixed
-- Root cause: Example included SHTC3 temperature/humidity driver using the legacy I2C API alongside newer drivers.
-- Fix applied: Removed SHTC3 endpoints and initialization from `main/app_main.cpp` (kept only PIR occupancy). Rebuilt and flashed.
-- Result: Device boots cleanly without I2C abort loop. Commissioning flow now proceeds to provider/QR stage.
-
-### Step 4.3: Commission Device to Apple Home
-**Purpose**: Add the ESP32-C3 Matter occupancy sensor to Apple Home using the generated QR code.
-
-**Commissioning Details**:
-- **QR Code**: `MT:Y.K90GSY00KA0648G00`
-- **QR Code URL**: https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.K90GSY00KA0648G00
-- **Manual Code**: `34970112332` (formatted as `3497-011-2332`)
-- **Passcode**: 20202021
-- **Discriminator**: 3840 (0xF00)
-- **Device Type**: Occupancy Sensor (0x0107)
-- **Vendor ID**: 0x131B (Espressif)
-- **Product ID**: 0x1234
-
-**Steps to Commission**:
-1. Open Apple Home app on iPhone/iPad
-2. Tap "+" to add accessory
-3. Tap "Add Accessory"
-4. Scan QR code: `MT:Y.K90GSY00KA0648G00` or visit the QR code URL above
-5. If QR doesn't work, select "More Options..." and enter manual code: `34970112332`
-6. Follow on-screen instructions
-7. Verify occupancy sensor appears in Home app
-8. Test PIR sensor functionality on GPIO 3
-
-**Status**: ✅ SUCCESSFULLY COMMISSIONED
-
-**Result**: ✅ Device successfully commissioned to Apple Home! Occupancy sensor appears in Home app and PIR detection working correctly. Device boots with QR code and manual pairing code displayed. BLE advertising active.
-
-**Commissioning Steps Used**:
-1. Ensured ESP32 was powered and showing "CHIPoBLE advertising started" in logs
-2. On iPhone/iPad:
-   - Opened Home app
-   - Tapped "+" → "Add Accessory"
-   - Scanned QR code: `MT:Y.K90GSY00KA0648G00`
-   - Followed prompts to add to Home
-3. Tested: Waved hand in front of PIR sensor (GPIO 3) → occupancy updated in Home app ✅
-
-**Troubleshooting Commissioning** (if needed for future devices):
-- If "Accessory Not Found": Ensure BLE is on, ESP32 is advertising (check serial logs)
-- If "Unable to Add": Try factory reset (erase flash), reflash firmware and factory data
-- If paired but not responding: Check WiFi credentials were entered during pairing
-- QR Code URL (for remote viewing): https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.K90GSY00KA0648G00
-- Manual code alternative: `34970112332`
 
 ---
 

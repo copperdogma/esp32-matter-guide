@@ -11,9 +11,10 @@ This template demonstrates how to implement a Matter-compatible occupancy sensor
 - **Occupancy Attribute**: Binary (occupied = true/false)
 
 ### Hardware Integration
-- **GPIO Pin**: GPIO 5 (`CONFIG_PIR_DATA_PIN`) - change this for your hardware
+- **GPIO Pin**: GPIO 3 (`CONFIG_PIR_DATA_PIN`) - configurable via `idf.py menuconfig` under "Example Configuration"
 - **Interrupt Type**: `GPIO_INTR_ANYEDGE` - triggers on both rising and falling edges
 - **Pull Mode**: `GPIO_PULLDOWN_ONLY` - ensures clean signal when motion is not detected
+- **Note**: Default PIR GPIO in ESP-Matter examples is GPIO 7, but can be changed to match your hardware
 
 ### Key Code Sections
 
@@ -58,7 +59,7 @@ The following parts are generic to all Matter devices and should rarely need cha
 
 - ESP32-C3 development board
 - PIR motion sensor (e.g., HC-SR501, AM312)
-- Connection: PIR OUT → GPIO 5, VCC → 3.3V, GND → GND
+- Connection: PIR OUT → GPIO 3 (configurable), VCC → 3.3V, GND → GND
 
 An AI working with this template would understand that the GPIO pin, sensor type, and attribute updates are the primary things to modify for different sensor implementations.
 
