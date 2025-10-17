@@ -298,20 +298,36 @@ cp ../templates/occupancy-sensor/drivers/pir.* main/drivers/
 # Configure for ESP32-C3
 idf.py set-target esp32c3
 
-# Configure sdkconfig for production credentials (use menuconfig)
-idf.py menuconfig
-# Navigate to:
-# - "Component config" → "CHIP Device Layer" → "Matter Device Config"
-#   ✓ Enable "ESP32 Factory Data Provider"
-#   ✓ Enable "ESP32 Device Instance Info Provider"  
-# - "Component config" → "CHIP Device Layer" → "Commissioning options"
-#   ✓ Enable "Use Commissioning Data from Factory Partition"
-#   ✗ DISABLE "Enable Test Commissioning Credentials"
-# - "Component config" → "CHIP Device Layer" → "Factory Partition Label"
-#   Set to: "fctry"
-# - "Example Configuration"
-#   Set "PIR Data Pin" to: 3
-# Save and exit menuconfig
+# Configure sdkconfig for production credentials
+# Method 1: Direct edit (recommended for AI agents and automation)
+cat >> sdkconfig << 'EOF'
+CONFIG_ENABLE_ESP32_FACTORY_DATA_PROVIDER=y
+CONFIG_ENABLE_ESP32_DEVICE_INSTANCE_INFO_PROVIDER=y
+CONFIG_USE_FACTORY_DATA_FOR_COMMISSIONING_VALUES=y
+# CONFIG_ENABLE_TEST_COMMISSIONING_CREDENTIALS is not set
+CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="fctry"
+CONFIG_PIR_DATA_PIN=3
+EOF
+
+# Apply configuration changes
+idf.py reconfigure
+
+# Method 2: Interactive menuconfig (HUMANS ONLY - requires TTY)
+# AI agents cannot use interactive tools, so skip this if you're an AI
+# If you're a human, you can instead run:
+#   idf.py menuconfig
+# Then navigate to:
+#   - "Component config" → "CHIP Device Layer" → "Matter Device Config"
+#     ✓ Enable "ESP32 Factory Data Provider"
+#     ✓ Enable "ESP32 Device Instance Info Provider"  
+#   - "Component config" → "CHIP Device Layer" → "Commissioning options"
+#     ✓ Enable "Use Commissioning Data from Factory Partition"
+#     ✗ DISABLE "Enable Test Commissioning Credentials"
+#   - "Component config" → "CHIP Device Layer" → "Factory Partition Label"
+#     Set to: "fctry"
+#   - "Example Configuration"
+#     Set "PIR Data Pin" to: 3
+#   Save and exit
 ```
 
 ### Step 4: Generate Unique Device Credentials
@@ -333,13 +349,16 @@ esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF0
 ### Step 5: Add pin-code to Factory Partition
 
 ```bash
-# Find the generated UUID directory
+# Find the generated UUID directory and set UUID variable
 ls -la 131b_1234/
-UUID="<your-uuid-from-above>"
+UUID="<your-uuid-from-above>"  # Replace with actual UUID from ls output
 
-# Manually edit 131b_1234/$UUID/internal/partition.csv
-# Add this line after discriminator:
-#   pin-code,data,u32,20202021
+# Add pin-code to factory partition CSV using sed
+sed -i.bak '/discriminator,data,u32,/a\
+pin-code,data,u32,20202021' 131b_1234/$UUID/internal/partition.csv
+
+# Verify the pin-code was added (should show the pin-code line)
+grep "pin-code" 131b_1234/$UUID/internal/partition.csv
 
 # Regenerate factory partition binary
 python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate 131b_1234/$UUID/internal/partition.csv 131b_1234/$UUID/partition_fixed.bin 0x6000
@@ -367,13 +386,21 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
 ### Step 7: Verify QR Code
 
 ```bash
-# Monitor serial output
-idf.py -p /dev/tty.usbmodem101 monitor
+# Method 1: Automated capture (recommended for AI agents and automation)
+$REPO_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture.txt -d 15
 
-# Look for these lines in the output:
+# Verify QR code and commissioning info in captured log
+grep -A 3 "SetupQRCode\|Manual pairing code\|CHIPoBLE advertising" boot_capture.txt
+
+# Expected output:
 # I (xxxx) chip[SVR]: SetupQRCode: [MT:Y.K90GSY00KA0648G00]
 # I (xxxx) chip[SVR]: Manual pairing code: [34970112332]
 # I (xxxx) chip[DL]: CHIPoBLE advertising started
+
+# Method 2: Interactive monitor (HUMANS ONLY - requires TTY)
+# AI agents cannot use interactive tools, so use Method 1 instead
+# If you're a human and want live monitoring:
+#   idf.py -p /dev/tty.usbmodem101 monitor
 ```
 
 ### Step 8: Commission to Apple Home
