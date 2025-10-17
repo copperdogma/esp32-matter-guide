@@ -34,7 +34,7 @@ The ESP32-C3 Matter occupancy sensor is now **fully functional** with unique cre
 - **Commissioned**: ✅ Successfully added to Apple Home
 - **Tested**: ✅ PIR sensor detects occupancy in Home app
 
-**Key Fix Applied**: Patched ESP32FactoryDataProvider to implement `GetSetupPasscode()` and added `pin-code` to factory NVS partition. See [QR Code Issue Resolution](#-qr-code-issue-resolved-october-16-2025) for details.
+**Key Fix Applied**: Patched ESP32FactoryDataProvider to implement `GetSetupPasscode()` and added `pin-code` to factory NVS partition. See [Known Issue: QR Code Not Printing](#known-issue-qr-code-not-printing-getsetuppasscode-bug) for details.
 
 ---
 
@@ -69,11 +69,14 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/
 ```
 
 ### Using the Template Firmware
-**Location**: `templates/occupancy-sensor/` - Minimal working PIR occupancy sensor firmware (can adapt to any device type)
+**Location**: `$MATTER_GUIDE/templates/occupancy-sensor/` - Minimal working PIR occupancy sensor firmware (can adapt to any device type)
 
 ```bash
+# Ensure MATTER_GUIDE is set (from Step 0)
+# export MATTER_GUIDE=~/Documents/esp32-matter-guide  # adjust path as needed
+
 # Copy template and build
-cp -r templates/occupancy-sensor ~/esp/my_matter_device
+cp -r $MATTER_GUIDE/templates/occupancy-sensor ~/esp/my_matter_device
 cd ~/esp/my_matter_device
 idf.py set-target esp32c3 && idf.py build
 
@@ -160,7 +163,7 @@ fi
 ```
 
 **Fix** (if bug exists):
-1. Apply patch: `cd ~/esp/esp-matter && patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch`
+1. Apply patch: `cd ~/esp/esp-matter && patch -p1 < $MATTER_GUIDE/patches/esp32-factory-data-provider-getsetuppasscode.patch`
 2. After running `esp-matter-mfg-tool`, edit `131b_1234/<UUID>/internal/partition.csv` and add:
    ```
    pin-code,data,u32,20202021
@@ -216,6 +219,22 @@ This section provides a clean, linear path from zero to a working Matter device.
 - ESP32-C3 development board connected via USB
 - Basic familiarity with terminal/command line
 
+### Step 0: Clone This Guide Repository
+
+**Important**: Clone this repository first to access patches and templates:
+
+```bash
+cd ~/Documents  # or wherever you keep projects
+git clone https://github.com/copperdogma/esp32-matter-guide.git
+cd esp32-matter-guide
+```
+
+All relative paths in this guide assume you're working from this directory. Set a variable for convenience:
+
+```bash
+export MATTER_GUIDE=$(pwd)
+```
+
 ### Step 1: Install ESP-IDF and ESP-Matter
 
 ```bash
@@ -251,7 +270,7 @@ cd ../..
 if grep "GetSetupPasscode.*override" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.h | grep -q "CHIP_ERROR_NOT_IMPLEMENTED"; then
     echo "⚠️  Bug exists - applying patch..."
     cd ~/esp/esp-matter
-    patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch
+    patch -p1 < $MATTER_GUIDE/patches/esp32-factory-data-provider-getsetuppasscode.patch
     echo "✅ Patch applied successfully"
 else
     echo "✅ Bug already fixed upstream - no patch needed!"
@@ -271,8 +290,8 @@ cp -r ~/esp/esp-matter/examples/sensors ~/esp/my_matter_device
 cd ~/esp/my_matter_device
 
 # Replace with template files (occupancy-only, no I2C conflicts)
-cp /path/to/esp32-matter-guide/templates/occupancy-sensor/app_main.cpp main/
-cp /path/to/esp32-matter-guide/templates/occupancy-sensor/drivers/pir.* main/drivers/
+cp $MATTER_GUIDE/templates/occupancy-sensor/app_main.cpp main/
+cp $MATTER_GUIDE/templates/occupancy-sensor/drivers/pir.* main/drivers/
 
 # Configure for ESP32-C3
 idf.py set-target esp32c3
