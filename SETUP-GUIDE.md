@@ -94,39 +94,27 @@ cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export
 idf.py -p /dev/tty.usbmodem101 monitor
 ```
 
-### 3.1 Capture Full Boot Log via PySerial (Most Reliable in Non-TTY/CI)
+### 3.1 Capture Full Boot Log (Non-Interactive, AI-Friendly)
 ```bash
-# Requires: pyserial (pip install pyserial)
-# Captures full boot header by toggling DTR/RTS and reading for ~12s
-python3 - << 'PY'
-import sys, time
-try:
-    import serial
-except Exception as e:
-    print('pyserial not installed:', e); sys.exit(1)
-port = '/dev/cu.usbmodem101'
-baud = 115200
-out_path = 'boot_capture.txt'
-ser = serial.Serial(port=port, baudrate=baud, timeout=0.1)
-ser.reset_input_buffer(); ser.reset_output_buffer()
-# Toggle DTR/RTS to reset
-ser.dtr = False; ser.rts = False; time.sleep(0.05)
-ser.dtr = True; ser.rts = True
-end = time.time() + 12.0
-with open(out_path, 'wb') as f:
-    while time.time() < end:
-        data = ser.read(4096)
-        if data:
-            f.write(data); f.flush()
-        else:
-            time.sleep(0.02)
-ser.close()
-print('Wrote to', out_path)
-PY
+# Use the provided boot capture script (requires pyserial: pip install pyserial)
+# This automatically resets the device and captures ~12 seconds of serial output
+$REPO_ROOT/scripts/capture_boot.py
+
+# Or with custom options:
+$REPO_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture.txt -d 15
 
 # Inspect captured log
 head -200 boot_capture.txt
+
+# Get help on all options
+$REPO_ROOT/scripts/capture_boot.py --help
 ```
+
+**Features:**
+- Automatically resets device via DTR/RTS toggle
+- Captures full boot sequence including QR codes
+- Analyzes output for common issues (QR code present, crashes, errors)
+- Configurable port, duration, and output file
 
 ### 3.2 Print QR and Manual Code at Boot (Firmware)
 To print the Base38 QR and manual pairing code on startup, use the official helper:
