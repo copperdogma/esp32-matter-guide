@@ -1,13 +1,22 @@
 # ESP32-C3 Matter Occupancy Sensor Setup Guide
 
-**Created**: January 15, 2025  
-**Goal**: Set up ESP32-C3 Supermini as a Matter occupancy sensor device that can be reliably commissioned to Apple Home with changeable unique IDs/QR codes.
+**Last Updated**: October 16, 2025  
+**Status**: Complete and Verified  
+**Goal**: Set up ESP32-C3 as a Matter-compatible device that can be reliably commissioned to Apple Home with unique, changeable credentials.
 
-**Hardware**:
-- ESP32-C3 Supermini connected at `/dev/tty.usbmodem101`
-- PIR sensor on GPIO3
+**Tested Hardware**:
+- ESP32-C3 Supermini (any ESP32-C3 board should work)
+- PIR motion sensor on GPIO 3 (HC-SR501 or similar)
+- USB-C connection for programming and serial monitoring
 
-**Documentation Philosophy**: This guide tracks every attempt, success, and failure in real-time. Each step is documented BEFORE execution, then updated with results.
+**What This Guide Provides**:
+- Complete environment setup (ESP-IDF 5.4.1 + ESP-Matter)
+- Step-by-step firmware building and flashing
+- Factory credential generation with unique QR codes
+- Tested solutions for upstream ESP-Matter bugs
+- Commissioning to Apple Home
+- Verified process for changing device QR codes
+- Comprehensive troubleshooting for common issues
 
 ---
 
@@ -59,8 +68,8 @@ esptool.py --chip esp32c3 -p /dev/tty.usbmodem101 erase_flash
 
 ### 2. Build and Flash Firmware
 ```bash
-# Navigate to project directory
-cd /Users/cam/Documents/Projects/esp32-matter-guide/firmware
+# Navigate to your firmware directory
+cd ~/path/to/your/firmware
 
 # Build firmware
 idf.py build
@@ -69,16 +78,17 @@ idf.py build
 idf.py -p /dev/cu.usbmodem101 flash
 
 # Flash factory partition with credentials (after generating)
-esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/1c9c03d8-e234-4569-aeba-e899bed703c6/1c9c03d8-e234-4569-aeba-e899bed703c6-partition.bin
+# Replace <UUID> with your actual UUID from 131b_1234/ directory
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/<UUID>/<UUID>-partition.bin
 ```
 
-### Using the Known-Good Template Firmware
+### Using the Template Firmware
 - **What it is**: A minimal, working ESP-Matter firmware configured as a PIR occupancy sensor, verified to build/flash/boot. Use it as a starting point for any device type.
-- **Location**: `/Users/cam/Documents/Projects/esp32-matter-guide/firmware`
+- **Location**: `templates/occupancy-sensor/` in this repository
 - **How to use**:
-  1) Copy the folder to start a new project:
+  1) Copy the template to start a new project:
      ```bash
-     cp -r /Users/cam/Documents/Projects/esp32-matter-guide/firmware ~/esp/projects/my_new_matter_device
+     cp -r templates/occupancy-sensor ~/esp/projects/my_new_matter_device
      cd ~/esp/projects/my_new_matter_device
      ```
   2) Set target and build:
@@ -99,7 +109,7 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/
 ```bash
 # Human (interactive) monitoring only
 # First setup environment, then navigate to project, then monitor
-cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export.sh && cd /Users/cam/Documents/Projects/esp32-matter-guide/firmware
+cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export.sh && cd ~/path/to/your/firmware
 idf.py -p /dev/tty.usbmodem101 monitor
 ```
 
@@ -115,7 +125,7 @@ except Exception as e:
     print('pyserial not installed:', e); sys.exit(1)
 port = '/dev/cu.usbmodem101'
 baud = 115200
-out_path = '/Users/cam/Documents/Projects/esp32-matter-guide/boot_capture.txt'
+out_path = 'boot_capture.txt'
 ser = serial.Serial(port=port, baudrate=baud, timeout=0.1)
 ser.reset_input_buffer(); ser.reset_output_buffer()
 # Toggle DTR/RTS to reset
@@ -134,7 +144,7 @@ print('Wrote to', out_path)
 PY
 
 # Inspect captured log
-head -200 /Users/cam/Documents/Projects/esp32-matter-guide/boot_capture.txt
+head -200 boot_capture.txt
 ```
 
 ### 3.2 Print QR and Manual Code at Boot (Firmware)
@@ -191,10 +201,10 @@ ACTION REQUIRED:
 
 **Solution - Apply Patch**:
 
-1. **Apply the patch** (from project root):
+1. **Apply the patch** (from esp-matter root):
    ```bash
    cd ~/esp/esp-matter
-   patch -p1 < /Users/cam/Documents/Projects/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch
+   patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch
    ```
 
 2. **Verify patch applied successfully**:
@@ -264,9 +274,26 @@ chip-cert gen-cd --key ESP32_C3_Matter_PAA_key.pem --cert ESP32_C3_Matter_PAA_ce
 esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF00 --dac-cert ESP32_C3_Matter_DAC_cert.pem --dac-key ESP32_C3_Matter_DAC_key.pem --pai --cert ESP32_C3_Matter_PAI_cert.pem --key ESP32_C3_Matter_PAI_key.pem --cert-dclrn ESP32_C3_Matter_CD.der --outdir .
 ```
 
----
+### 5. Change Device QR Code (Quick Reference)
+**See full tested workflow in**: [How to Change Device QR Code](#how-to-change-device-qr-code-tested--verified)
+
+```bash
+# Quick summary - refer to full section for details
+# 1. Remove device from Apple Home
+# 2. Generate new certs (PAA → PAI → DAC → CD)
+# 3. Run esp-matter-mfg-tool with NEW passcode/discriminator
+# 4. Add pin-code to factory CSV
+# 5. Regenerate partition binary
+# 6. Erase NVS, flash partition, REBOOT device
+# 7. Verify new QR code in boot log
+# 8. Re-commission to Apple Home
+```
 
 ---
+
+## Historical Development Log
+
+The following sections document the actual development process, including all attempts, failures, and solutions discovered. These are preserved for transparency and to help troubleshoot similar issues.
 
 ## Phase 0: Initialize Documentation & Clean Baseline
 
@@ -715,38 +742,128 @@ esptool.py --chip esp32c3 -p /dev/tty.usbmodem101 run && timeout 5s cat /dev/tty
 
 ---
 
-## Phase 5: Test Credential Regeneration
+## How to Change Device QR Code (Tested & Verified)
 
-### Step 5.1: Generate Second Set of Unique Credentials
-**Purpose**: Create a new set of credentials to test the ability to change the device's unique ID (QR code) on demand.
+This section documents the complete, tested process for changing a device's QR code and commissioning credentials. This is useful when you need to:
+- Generate unique credentials for multiple devices
+- Replace compromised credentials
+- Test different passcode/discriminator combinations
 
-**Commands to execute**:
+### Complete Workflow
+
+**Step 1: Remove device from Apple Home** (if currently paired)
+- Open Apple Home app → Select device → Remove Accessory
+
+**Step 2: Generate new certificate chain**
 ```bash
-# Generate new PAA certificate
-chip-cert gen-att-cert --type a --subject-cn "ESP32-C3 Matter PAA v2" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key ESP32_C3_Matter_PAA_v2_key.pem --out ESP32_C3_Matter_PAA_v2_cert.pem
+cd /path/to/your/firmware/directory
 
-# Generate new PAI certificate
-chip-cert gen-att-cert --type i --subject-cn "ESP32-C3 Matter PAI v2" --subject-vid 0x131B --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAA_v2_key.pem --ca-cert ESP32_C3_Matter_PAA_v2_cert.pem --out-key ESP32_C3_Matter_PAI_v2_key.pem --out ESP32_C3_Matter_PAI_v2_cert.pem
+# Generate PAA (Product Attestation Authority)
+chip-cert gen-att-cert --type a --subject-cn "ESP32-C3 Matter PAA v3" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key ESP32_C3_Matter_PAA_v3_key.pem --out ESP32_C3_Matter_PAA_v3_cert.pem
 
-# Generate new DAC certificate
-chip-cert gen-att-cert --type d --subject-cn "ESP32-C3 Matter DAC v2" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAI_v2_key.pem --ca-cert ESP32_C3_Matter_PAI_v2_cert.pem --out-key ESP32_C3_Matter_DAC_v2_key.pem --out ESP32_C3_Matter_DAC_v2_cert.pem
+# Generate PAI (Product Attestation Intermediate)
+chip-cert gen-att-cert --type i --subject-cn "ESP32-C3 Matter PAI v3" --subject-vid 0x131B --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAA_v3_key.pem --ca-cert ESP32_C3_Matter_PAA_v3_cert.pem --out-key ESP32_C3_Matter_PAI_v3_key.pem --out ESP32_C3_Matter_PAI_v3_cert.pem
 
-# Generate new Certification Declaration
-chip-cert gen-cd --key ESP32_C3_Matter_PAA_v2_key.pem --cert ESP32_C3_Matter_PAA_v2_cert.pem --out ESP32_C3_Matter_CD_v2.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330002-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
+# Generate DAC (Device Attestation Certificate)
+chip-cert gen-att-cert --type d --subject-cn "ESP32-C3 Matter DAC v3" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAI_v3_key.pem --ca-cert ESP32_C3_Matter_PAI_v3_cert.pem --out-key ESP32_C3_Matter_DAC_v3_key.pem --out ESP32_C3_Matter_DAC_v3_cert.pem
 
-# Generate new factory partition with different credentials
-esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202022 --discriminator 0xF01 --dac-cert ESP32_C3_Matter_DAC_v2_cert.pem --dac-key ESP32_C3_Matter_DAC_v2_key.pem --pai --cert ESP32_C3_Matter_PAI_v2_cert.pem --key ESP32_C3_Matter_PAI_v2_key.pem --cert-dclrn ESP32_C3_Matter_CD_v2.der --outdir .
+# Generate CD (Certification Declaration)
+chip-cert gen-cd --key ESP32_C3_Matter_PAA_v3_key.pem --cert ESP32_C3_Matter_PAA_v3_cert.pem --out ESP32_C3_Matter_CD_v3.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330003-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
 ```
 
-**Status**: 🔄 PENDING - About to execute
+**Step 3: Generate factory partition with NEW credentials**
+```bash
+# Use different passcode and discriminator to ensure QR code is unique
+# Valid passcode range: avoid sequential/repetitive patterns
+# Discriminator range: 0x000 to 0xFFF (0-4095)
 
-**Result**: [Will be updated after execution]
+esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 34567890 --discriminator 0x800 --dac-cert ESP32_C3_Matter_DAC_v3_cert.pem --dac-key ESP32_C3_Matter_DAC_v3_key.pem --pai --cert ESP32_C3_Matter_PAI_v3_cert.pem --key ESP32_C3_Matter_PAI_v3_key.pem --cert-dclrn ESP32_C3_Matter_CD_v3.der --outdir .
+```
 
----
+**Step 4: Add pin-code to factory CSV**
+```bash
+# Locate the generated UUID directory
+ls -la 131b_1234/
 
-## Phase 6: Document Streamlined Process
+# Edit the partition CSV (replace UUID with your actual UUID)
+# Add this line after discriminator:
+# pin-code,data,u32,34567890
 
-*[Steps will be added as we progress]*
+# Example using sed:
+UUID="<your-uuid-here>"
+sed -i.bak '/discriminator,data,u32,/a\
+pin-code,data,u32,34567890' 131b_1234/$UUID/internal/partition.csv
+```
+
+**Step 5: Regenerate factory partition binary**
+```bash
+python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate 131b_1234/$UUID/internal/partition.csv 131b_1234/$UUID/partition_fixed.bin 0x6000
+```
+
+**Step 6: Erase NVS, flash new partition, and reboot**
+```bash
+# Erase operational NVS (clears old pairings)
+python -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 erase_region 0x10000 0xC000
+
+# Flash new factory partition
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/$UUID/partition_fixed.bin
+
+# CRITICAL: Reboot device to load new credentials
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
+```
+
+**Step 7: Verify new QR code**
+```bash
+# Capture boot log
+python3 - << 'PY'
+import sys, time, serial
+port = '/dev/cu.usbmodem101'
+baud = 115200
+out_path = 'boot_capture_new.txt'
+ser = serial.Serial(port=port, baudrate=baud, timeout=0.1)
+ser.reset_input_buffer(); ser.reset_output_buffer()
+ser.dtr = False; ser.rts = False; time.sleep(0.05)
+ser.dtr = True; ser.rts = True
+end = time.time() + 12.0
+with open(out_path, 'wb') as f:
+    while time.time() < end:
+        data = ser.read(4096)
+        if data:
+            f.write(data); f.flush()
+        else:
+            time.sleep(0.02)
+ser.close()
+print('Wrote to', out_path)
+PY
+
+# Check QR code
+grep -A 3 "SetupQRCode" boot_capture_new.txt
+```
+
+**Step 8: Re-commission to Apple Home**
+- Open Apple Home app → Add Accessory
+- Scan new QR code or enter manual pairing code
+- Verify device pairs successfully and responds to occupancy events
+
+### Verified Results (October 16, 2025)
+
+**Original Credentials:**
+- QR Code: `MT:Y.K90GSY00KA0648G00`
+- Manual Code: `34970112332`
+- Passcode: 20202021
+- Discriminator: 3840 (0xF00)
+
+**New Credentials (v3):**
+- QR Code: `MT:Y.K90GSY00AJVH7SR00` ✅
+- Manual Code: `21403421094` ✅
+- Passcode: 34567890
+- Discriminator: 2048 (0x800)
+
+**Status**: ✅ COMPLETED & VERIFIED
+- Device successfully changed QR code
+- Device re-commissioned to Apple Home
+- PIR occupancy sensor functioning correctly
+- Process fully documented and tested
 
 ---
 
@@ -945,8 +1062,45 @@ To flash a device with unique factory credentials:
    
    # Erase operational NVS
    esptool.py -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
+   
+   # CRITICAL: Reboot device to load new credentials
+   esptool.py -p /dev/tty.usbmodem101 run
    ```
 5. **Reboot and pair** - device should advertise new unique credentials
+
+### "Accessory Not Found" Immediately After Flashing
+
+**Symptom**: After flashing new factory partition, Apple Home shows "Accessory Not Found" on first pairing attempt.
+
+**Cause**: Device didn't automatically reboot after flashing, so it's still advertising old credentials (or not advertising at all).
+
+**Solution**: Explicitly reboot the device after flashing:
+```bash
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
+```
+
+Or start monitoring (which automatically resets the device):
+```bash
+idf.py -p /dev/tty.usbmodem101 monitor
+```
+
+### CASE Errors After Removing Device from Apple Home
+
+**Symptom**: After removing device from Apple Home, serial logs show repeated errors:
+```
+E chip[SC]: CASE failed to match destination ID with local fabrics
+E chip[IN]: CASE Session establishment failed: 10
+```
+
+**Cause**: iOS still has the device cached in its local Matter controller database and periodically tries to reconnect. The device correctly rejects these attempts because the fabric was erased.
+
+**This is NORMAL and EXPECTED!**
+- The device is correctly rejecting unauthorized connection attempts
+- iOS will eventually stop trying as its cache expires
+- The errors don't affect device functionality or new pairings
+- This proves the security system is working correctly
+
+**No action required** - these errors will stop on their own
 
 ---
 
@@ -957,6 +1111,4 @@ For deeper technical understanding of Matter protocol, commissioning flows, and 
 
 ---
 
-## Notes on esp32-matter-guide.md
-
-*[Corrections and updates to the reference guide will be noted here]*
+**End of Setup Guide** - For deeper technical understanding, see [docs/MATTER-TECHNICAL-GUIDE.md](docs/MATTER-TECHNICAL-GUIDE.md)
