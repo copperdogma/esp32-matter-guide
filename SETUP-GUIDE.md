@@ -69,18 +69,17 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/
 ```
 
 ### Using the Template Firmware
-**Location**: `$MATTER_GUIDE/templates/occupancy-sensor/` - Minimal working PIR occupancy sensor firmware (can adapt to any device type)
+**Location**: `templates/occupancy-sensor/` - Minimal working PIR occupancy sensor firmware (can adapt to any device type)
 
 ```bash
-# Ensure MATTER_GUIDE is set (from Step 0)
-# export MATTER_GUIDE=~/Documents/esp32-matter-guide  # adjust path as needed
+# From repository root directory
+cp -r ~/esp/esp-matter/examples/sensors ./firmware
+cd firmware
+cp ../templates/occupancy-sensor/app_main.cpp main/
+cp ../templates/occupancy-sensor/drivers/pir.* main/drivers/
 
-# Copy template and build
-cp -r $MATTER_GUIDE/templates/occupancy-sensor ~/esp/my_matter_device
-cd ~/esp/my_matter_device
+# Build and flash
 idf.py set-target esp32c3 && idf.py build
-
-# Flash and monitor
 idf.py -p /dev/cu.usbmodem101 flash
 idf.py -p /dev/tty.usbmodem101 monitor
 ```
@@ -163,7 +162,7 @@ fi
 ```
 
 **Fix** (if bug exists):
-1. Apply patch: `cd ~/esp/esp-matter && patch -p1 < $MATTER_GUIDE/patches/esp32-factory-data-provider-getsetuppasscode.patch`
+1. Apply patch (from repository root): `cd ~/esp/esp-matter && patch -p1 < $REPO_ROOT/patches/esp32-factory-data-provider-getsetuppasscode.patch`
 2. After running `esp-matter-mfg-tool`, edit `131b_1234/<UUID>/internal/partition.csv` and add:
    ```
    pin-code,data,u32,20202021
@@ -227,13 +226,12 @@ This section provides a clean, linear path from zero to a working Matter device.
 cd ~/Documents  # or wherever you keep projects
 git clone https://github.com/copperdogma/esp32-matter-guide.git
 cd esp32-matter-guide
+
+# Save the repository root path for later use
+REPO_ROOT=$(pwd)
 ```
 
-All relative paths in this guide assume you're working from this directory. Set a variable for convenience:
-
-```bash
-export MATTER_GUIDE=$(pwd)
-```
+**📁 Directory Structure**: All commands in this guide assume you're working from the repository root. Your firmware project will be created in `firmware/` subdirectory, which keeps all project files, credentials, and build artifacts organized in one place.
 
 ### Step 1: Install ESP-IDF and ESP-Matter
 
@@ -266,11 +264,13 @@ cd ../..
 ### Step 2: Check and Apply Upstream Patches
 
 ```bash
+# From the repository root (esp32-matter-guide directory)
 # Check if the GetSetupPasscode bug exists
 if grep "GetSetupPasscode.*override" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.h | grep -q "CHIP_ERROR_NOT_IMPLEMENTED"; then
     echo "⚠️  Bug exists - applying patch..."
     cd ~/esp/esp-matter
-    patch -p1 < $MATTER_GUIDE/patches/esp32-factory-data-provider-getsetuppasscode.patch
+    patch -p1 < patches/esp32-factory-data-provider-getsetuppasscode.patch
+    cd -  # Return to previous directory
     echo "✅ Patch applied successfully"
 else
     echo "✅ Bug already fixed upstream - no patch needed!"
@@ -285,13 +285,17 @@ cd ~/esp/esp-idf && source ./export.sh
 cd ~/esp/esp-matter && source ./export.sh
 export IDF_CCACHE_ENABLE=1
 
+# Navigate to repository root
+cd $REPO_ROOT
+
 # Copy the sensors example from ESP-Matter (includes build infrastructure)
-cp -r ~/esp/esp-matter/examples/sensors ~/esp/my_matter_device
-cd ~/esp/my_matter_device
+# This creates the firmware folder INSIDE your repository
+cp -r ~/esp/esp-matter/examples/sensors ./firmware
+cd firmware
 
 # Replace with template files (occupancy-only, no I2C conflicts)
-cp $MATTER_GUIDE/templates/occupancy-sensor/app_main.cpp main/
-cp $MATTER_GUIDE/templates/occupancy-sensor/drivers/pir.* main/drivers/
+cp ../templates/occupancy-sensor/app_main.cpp main/
+cp ../templates/occupancy-sensor/drivers/pir.* main/drivers/
 
 # Configure for ESP32-C3
 idf.py set-target esp32c3
@@ -493,7 +497,7 @@ If commissioning completely fails:
 esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 erase_flash
 
 # 2. Rebuild and flash everything
-cd ~/esp/my_matter_device
+cd $REPO_ROOT/firmware
 idf.py fullclean
 idf.py build
 idf.py -p /dev/cu.usbmodem101 flash
@@ -522,7 +526,8 @@ This section documents the complete, tested process for changing a device's QR c
 
 **Step 2: Generate new certificate chain**
 ```bash
-cd /path/to/your/firmware/directory
+# Navigate to your firmware directory inside the repository
+cd $REPO_ROOT/firmware
 
 # Generate PAA (Product Attestation Authority)
 chip-cert gen-att-cert --type a --subject-cn "ESP32-C3 Matter PAA v3" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key ESP32_C3_Matter_PAA_v3_key.pem --out ESP32_C3_Matter_PAA_v3_cert.pem

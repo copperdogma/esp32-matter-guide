@@ -68,7 +68,7 @@ esp32-matter-guide/
 ### What's NOT Committed (Generated Locally)
 
 **Firmware & Builds**
-- `firmware/` or `my_occupancy_sensor/` - Created by following SETUP-GUIDE.md
+- `firmware/` - Created by following SETUP-GUIDE.md
 - `build/` - ESP-IDF build artifacts
 - `*.bin`, `*.elf`, `*.map` - Compiled binaries
 
