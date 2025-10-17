@@ -228,7 +228,9 @@ REPO_ROOT=$(pwd)
 xcode-select --install
 brew install cmake ninja ccache python@3.10
 
-# For Apple Silicon Macs, install Rosetta 2
+# For Apple Silicon Macs (M1/M2/M3): Install Rosetta 2 (optional but recommended)
+# ESP-IDF 5.x has native ARM64 support, but some dependencies may still need x86_64
+# You can skip this and only install if you encounter "Bad CPU type" errors
 /usr/sbin/softwareupdate --install-rosetta --agree-to-license
 
 # Clone ESP-IDF 5.4.1
