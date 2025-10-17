@@ -291,11 +291,271 @@ esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF0
 
 ---
 
-## Historical Development Log
+## Step-by-Step Setup Guide
 
-The following sections document the actual development process, including all attempts, failures, and solutions discovered. These are preserved for transparency and to help troubleshoot similar issues.
+This section provides a clean, linear path from zero to a working Matter device. Follow these steps in order.
 
-## Phase 0: Initialize Documentation & Clean Baseline
+### Prerequisites
+
+- macOS with Xcode Command Line Tools installed
+- ESP32-C3 development board connected via USB
+- Basic familiarity with terminal/command line
+
+### Step 1: Install ESP-IDF and ESP-Matter
+
+```bash
+# Install dependencies
+xcode-select --install
+brew install cmake ninja ccache python@3.10
+
+# For Apple Silicon Macs, install Rosetta 2
+/usr/sbin/softwareupdate --install-rosetta --agree-to-license
+
+# Clone ESP-IDF 5.4.1
+mkdir -p ~/esp
+cd ~/esp
+git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git
+cd esp-idf
+./install.sh esp32c3
+
+# Clone ESP-Matter
+cd ~/esp
+git clone --depth 1 https://github.com/espressif/esp-matter.git
+cd esp-matter
+git submodule update --init --depth 1
+cd connectedhomeip/connectedhomeip
+./scripts/checkout_submodules.py --platform esp32 darwin --shallow
+cd ../..
+./install.sh
+```
+
+### Step 2: Check and Apply Upstream Patches
+
+```bash
+# Check if the GetSetupPasscode bug exists
+if grep "GetSetupPasscode.*override" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.h | grep -q "CHIP_ERROR_NOT_IMPLEMENTED"; then
+    echo "⚠️  Bug exists - applying patch..."
+    cd ~/esp/esp-matter
+    patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch
+    echo "✅ Patch applied successfully"
+else
+    echo "✅ Bug already fixed upstream - no patch needed!"
+fi
+```
+
+### Step 3: Create Your Firmware Project
+
+```bash
+# Set up environment (do this in every new terminal)
+cd ~/esp/esp-idf && source ./export.sh
+cd ~/esp/esp-matter && source ./export.sh
+export IDF_CCACHE_ENABLE=1
+
+# Copy template firmware
+cp -r /path/to/esp32-matter-guide/templates/occupancy-sensor ~/esp/my_matter_device
+cd ~/esp/my_matter_device
+
+# Configure for ESP32-C3
+idf.py set-target esp32c3
+```
+
+### Step 4: Generate Unique Device Credentials
+
+```bash
+# Generate certificate chain
+chip-cert gen-att-cert --type a --subject-cn "Matter PAA" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key PAA_key.pem --out PAA_cert.pem
+
+chip-cert gen-att-cert --type i --subject-cn "Matter PAI" --subject-vid 0x131B --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key PAA_key.pem --ca-cert PAA_cert.pem --out-key PAI_key.pem --out PAI_cert.pem
+
+chip-cert gen-att-cert --type d --subject-cn "Matter DAC" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key PAI_key.pem --ca-cert PAI_cert.pem --out-key DAC_key.pem --out DAC_cert.pem
+
+chip-cert gen-cd --key PAA_key.pem --cert PAA_cert.pem --out CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330001-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
+
+# Generate factory partition
+esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF00 --dac-cert DAC_cert.pem --dac-key DAC_key.pem --pai --cert PAI_cert.pem --key PAI_key.pem --cert-dclrn CD.der --outdir .
+```
+
+### Step 5: Add pin-code to Factory Partition
+
+```bash
+# Find the generated UUID
+ls -la 131b_1234/
+
+# Add pin-code to the CSV (replace <UUID> with actual UUID)
+UUID="<your-uuid-from-above>"
+echo "Adding pin-code to partition CSV..."
+
+# Edit the file to add pin-code line after discriminator
+# Manually edit 131b_1234/$UUID/internal/partition.csv and add:
+# pin-code,data,u32,20202021
+# (right after the discriminator line)
+
+# Regenerate factory partition binary
+python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate 131b_1234/$UUID/internal/partition.csv 131b_1234/$UUID/partition_fixed.bin 0x6000
+```
+
+### Step 6: Build and Flash Firmware
+
+```bash
+# Build firmware
+idf.py build
+
+# Erase chip (first time only)
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 erase_flash
+
+# Flash firmware
+idf.py -p /dev/cu.usbmodem101 flash
+
+# Flash factory partition (replace UUID)
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/$UUID/partition_fixed.bin
+
+# Reboot device
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
+```
+
+### Step 7: Verify QR Code
+
+```bash
+# Monitor serial output
+idf.py -p /dev/tty.usbmodem101 monitor
+
+# Look for these lines in the output:
+# I (xxxx) chip[SVR]: SetupQRCode: [MT:Y.K90GSY00KA0648G00]
+# I (xxxx) chip[SVR]: Manual pairing code: [34970112332]
+# I (xxxx) chip[DL]: CHIPoBLE advertising started
+```
+
+### Step 8: Commission to Apple Home
+
+1. Open Apple Home app on iPhone/iPad
+2. Tap "+" → "Add Accessory"
+3. Scan the QR code from serial output, or enter manual pairing code
+4. Follow prompts to complete setup
+5. Test the occupancy sensor by waving your hand in front of the PIR sensor
+
+**Success!** Your device should now appear in Apple Home and respond to motion detection.
+
+---
+
+## Troubleshooting
+
+### Environment Issues
+
+**"esptool.py: command not found"**
+- Cause: ESP-IDF environment not initialized
+- Solution: Run the environment setup commands:
+  ```bash
+  cd ~/esp/esp-idf && source ./export.sh
+  cd ~/esp/esp-matter && source ./export.sh
+  export IDF_CCACHE_ENABLE=1
+  ```
+
+### Certificate Generation Issues
+
+**"Invalid value specified for Certificate Id"**
+- Cause: Certificate ID format not recognized by CSA standards
+- Solution: Use proper format like "ZIG20142ZB330001-24" (not "ESP32-001" or simple numbers)
+
+**"esp-matter-mfg-tool: error: unrecognized arguments: --cd"**
+- Cause: Wrong parameter name for certification declaration
+- Solution: Use `--cert-dclrn` instead of `--cd`
+
+### Flashing and Boot Issues
+
+**"Accessory Not Found" Immediately After Flashing**
+- Cause: Device didn't automatically reboot after flashing factory partition
+- Solution: Explicitly reboot with `esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run`
+
+**Device in Boot Loop or No Serial Output**
+- Cause: Could be firmware issue, I2C driver conflict, or hardware problem
+- Solution: 
+  1. Check serial connection (use `/dev/cu.usbmodem101` not `/dev/tty.usbmodem101`)
+  2. Erase chip completely and reflash
+  3. Verify GPIO pin configurations match your hardware
+
+### Commissioning Issues
+
+**"Fabric already commissioned. Disabling BLE advertisement"**
+- Cause: Device has existing pairing data in NVS
+- Solution: Erase operational NVS:
+  ```bash
+  python -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 erase_region 0x10000 0xC000
+  # Then reboot device
+  esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
+  ```
+
+**"ERROR setting up transport: 2d" or QR Code Not Printing**
+- Cause: Missing `pin-code` in factory NVS or GetSetupPasscode not implemented
+- Solution: 
+  1. Verify patch was applied (see Step 2)
+  2. Ensure `pin-code` was added to factory CSV
+  3. Regenerate factory partition and reflash
+
+**"Chip stack locking error" / AssertChipStackLockedByCurrentThread**
+- Cause: Matter API called from wrong thread (ISR, GPIO callback, etc.)
+- Solution: Use `chip::DeviceLayer::PlatformMgr().ScheduleWork()` to defer to Matter thread
+
+**"Device Advertises Old/Wrong QR Code"**
+- Cause: Factory partition flashed to wrong address or wrong partition label in sdkconfig
+- Solution:
+  1. Verify partition offset in `partitions.csv` (should be 0x3E0000 for `fctry`)
+  2. Check `sdkconfig` has `CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="fctry"`
+  3. Reflash factory partition to correct address
+
+### Post-Removal Issues
+
+**CASE Errors After Removing Device from Apple Home**
+- Symptom: Repeated `E chip[SC]: CASE failed to match destination ID with local fabrics`
+- This is **NORMAL and EXPECTED!**
+- iOS continues trying to reconnect to cached devices
+- Device correctly rejects unauthorized attempts
+- Errors will stop on their own as cache expires
+- **No action required** - proves security is working correctly
+
+### Serial Output Interpretation
+
+**Benign Messages (Safe to Ignore)**:
+- `Warning: Checksum mismatch`: App is older than build, reflash if needed
+- `E esp_matter_cluster: Config is NULL`: Optional config pointer, doesn't affect commissioning
+- `W wifi: Haven't to connect`: Expected, no WiFi credentials yet
+- `W comm: pin-code not found in fctry NVS`: Falls back to hardcoded default
+- `chip[DMG]: DefaultAclStorage: 0 entries loaded`: Expected for uncommissioned device
+- `chip[SVR]: WARNING: mTestEventTriggerDelegate is null`: Expected, not used
+
+**Critical Messages (Action Required)**:
+- `E chip[SVR]: ERROR setting up transport: 2d`: SPAKE2p verifier missing/invalid
+- `Chip stack locking error` / `chipDie`: Threading violation
+- `Fabric already commissioned`: Device in operational mode, erase NVS
+
+### Recovery Procedure
+
+If commissioning completely fails:
+
+```bash
+# 1. Full chip erase
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 erase_flash
+
+# 2. Rebuild and flash everything
+cd ~/esp/my_matter_device
+idf.py fullclean
+idf.py build
+idf.py -p /dev/cu.usbmodem101 flash
+
+# 3. Reflash factory partition (replace UUID)
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/<UUID>/partition_fixed.bin
+
+# 4. Reboot and verify
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
+idf.py -p /dev/tty.usbmodem101 monitor
+```
+
+---
+
+## Development History (Optional Reading)
+
+The following sections document the actual development process, including all attempts, failures, and solutions discovered. These are preserved for historical context and to help understand how issues were diagnosed and resolved. **New users can skip this section.**
+
+### Phase 0: Initialize Documentation & Clean Baseline
 
 ### Step 0.1: Complete Chip Erase
 **Purpose**: Clear all NVS, fabrics, and credentials to start from a known clean baseline.
@@ -864,243 +1124,6 @@ grep -A 3 "SetupQRCode" boot_capture_new.txt
 - Device re-commissioned to Apple Home
 - PIR occupancy sensor functioning correctly
 - Process fully documented and tested
-
----
-
-## Troubleshooting & Lessons Learned
-
-### Critical Command Fixes Applied
-
-1. **Environment Setup**: 
-   - ❌ **Failed**: Separate commands for ESP-IDF and ESP-Matter
-   - ✅ **Fixed**: Combined command: `cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export.sh && export IDF_CCACHE_ENABLE=1`
-
-2. **Certification Declaration Generation**:
-   - ❌ **Failed**: `--certificate-id "ESP32-C3-Occupancy-001"` (invalid format)
-   - ❌ **Failed**: `--certificate-id "ESP32C3-001"` (invalid format)  
-   - ❌ **Failed**: `--certificate-id "12345678"` (invalid format)
-   - ✅ **Fixed**: `--certificate-id "ZIG20142ZB330001-24"` (proper CSA format)
-
-3. **Factory Partition Generation**:
-   - ❌ **Failed**: `esp-matter-mfg-tool generate-factory-partition --vid 0x131B...` (invalid subcommand)
-   - ❌ **Failed**: `--cd ESP32_C3_Matter_CD.der` (wrong parameter name)
-   - ✅ **Fixed**: `esp-matter-mfg-tool -v 0x131B -p 0x1234 --cert-dclrn ESP32_C3_Matter_CD.der...` (correct syntax)
-
-4. **Serial Monitoring (AI Limitation)**:
-   - ❌ **Failed**: `idf.py -p /dev/tty.usbmodem101 monitor` (requires interactive TTY)
-   - ❌ **Failed**: `screen /dev/tty.usbmodem101 115200` (requires interactive terminal)
-   - ✅ **Fixed**: `timeout 5s cat /dev/tty.usbmodem101 || echo "Device appears to be running normally"`
-
-### Common Issues & Solutions
-
-**Issue**: `esptool.py: command not found`
-- **Cause**: ESP-IDF environment not initialized
-- **Solution**: Run environment setup command first
-
-**Issue**: `chip-cert gen-cd: Invalid value specified for Certificate Id`
-- **Cause**: Certificate ID format not recognized by CSA
-- **Solution**: Use format like "ZIG20142ZB330001-24"
-
-**Issue**: `esp-matter-mfg-tool: error: unrecognized arguments: --cd`
-- **Cause**: Wrong parameter name for certification declaration
-- **Solution**: Use `--cert-dclrn` instead of `--cd`
-
-**Issue**: `idf_monitor failed with exit code 1`
-- **Cause**: Interactive monitoring requires TTY attachment
-- **Solution**: Use timeout-based monitoring for AI systems
-
-### AI-Friendly Monitoring Commands
-
-For AI systems that cannot use interactive commands:
-
-```bash
-# Quick device responsiveness check
-timeout 5s cat /dev/tty.usbmodem101 || echo "Device appears to be running normally"
-
-# Check for specific boot messages
-timeout 10s grep -i "matter\|esp\|wifi\|ble" /dev/tty.usbmodem101 || echo "No Matter-related messages detected"
-
-# Verify device is not in boot loop
-timeout 3s cat /dev/tty.usbmodem101 | head -5 || echo "Device likely booted successfully"
-```
-
-### Issue: ESP32FactoryDataProvider Missing GetSetupPasscode Implementation
-
-**Problem**: ESP32FactoryDataProvider has `GetSetupPasscode()` that returns `CHIP_ERROR_NOT_IMPLEMENTED`, but QR code generation requires the actual passcode. The esp-matter-mfg-tool doesn't generate `pin-code` in factory NVS.
-
-**Solution**: Apply the patch file located at `patches/esp32-factory-data-provider-getsetuppasscode.patch`
-
-See the [QR Code Issue Resolution](#-qr-code-issue-resolved-october-16-2025) section for:
-- How to check if the bug still exists
-- Complete patch application instructions
-- Factory partition CSV modifications
-- Expected output when working correctly
-
-**Quick Reference** (if bug confirmed):
-```bash
-# 1. Apply patch
-cd ~/esp/esp-matter
-patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-getsetuppasscode.patch
-
-# 2. Add pin-code to factory CSV (after mfg-tool generation)
-# 3. Regenerate partition binary
-# 4. Rebuild and flash
-
-# See full instructions in QR Code Issue Resolution section above
-```
-
----
-
-## Troubleshooting Common Issues
-
-### "Accessory Not Found" with Fabric Already Commissioned
-
-**Symptom**: Apple Home shows "Accessory Not Found" and serial logs show `Fabric already commissioned. Disabling BLE advertisement`.
-
-**Cause**: The device believes it's already paired to a fabric and won't enter BLE commissioning mode.
-
-**Solution**: You **must** erase the regular NVS partition to clear stored fabrics. The 10s button press for factory reset can be unreliable.
-
-```bash
-# Erase NVS partition (most reliable method)
-python -m esptool --chip esp32c3 -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
-
-# Or using parttool
-python $IDF_PATH/components/partition_table/parttool.py \
-  --port /dev/tty.usbmodem101 \
-  erase_partition --partition-name=nvs
-
-# Or from device console
-matter esp factoryreset
-```
-
-After erasure, reboot the device. It should now enter commissioning mode and advertise via BLE.
-
-### "ERROR setting up transport: 2d"
-
-**Symptom**: "Accessory Not Found" and serial logs show `E chip[SVR]: ERROR setting up transport: 2d`.
-
-**Cause**: A custom `CommissionableDataProvider` was introduced but failed to provide a valid **SPAKE2p verifier**. The `CommissioningWindowManager` requires this to set up the PASE session and fails before starting BLE advertising.
-
-**Solution**: The custom provider's `GetSpake2pVerifier` method must be implemented using `PASESession::GeneratePASEVerifier()` from the passcode, salt, and iteration count. See the QR Code Issue Resolution section for the complete fix.
-
-### Chip Stack Locking Error / Panic
-
-**Symptom**: Crash with `E (xxx) chip[DL]: Chip stack locking error at 'SystemLayerImplFreeRTOS.cpp:55'` or `AssertChipStackLockedByCurrentThread` panic/reboot loop.
-
-**Cause**: A Matter API was called from a task other than the main CHIP thread without acquiring the stack lock (e.g., from ISR, GPIO callback, or non-Matter thread).
-
-**Solution**:
-1. Wrap all custom provider methods with `chip::DeviceLayer::StackLock lock;`
-2. Open commissioning window by scheduling on CHIP thread:
-   ```cpp
-   chip::DeviceLayer::PlatformMgr().ScheduleWork(open_commissioning_window_deferred);
-   ```
-3. Use `ScheduleWork()` for any Matter API calls from non-Matter threads
-
-### Device Advertises Old/Default QR Code
-
-**Symptom**: Device advertises an old/default QR code despite flashing new factory data.
-
-**Causes**:
-- Factory NVS binary flashed to wrong memory address (e.g., regular `nvs` partition instead of `fctry` partition)
-- `sdkconfig` not configured to read from factory partition (`CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL`)
-
-**Solution**:
-1. Verify the `fctry` partition offset in `partitions.csv` (e.g., `0x3E0000`)
-2. Use that exact address in `esptool.py write_flash` command
-3. Ensure `sdkconfig` points to correct partition label: `CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="fctry"`
-
-### Interpreting Serial Output Anomalies
-
-**Benign (Safe to Ignore)**:
-- `Warning: Checksum mismatch...`: Flashed app is older than last build. Re-flash if needed.
-- `E esp_matter_cluster: Config is NULL...`: Optional config pointer is null. Doesn't affect commissioning.
-- `W wifi: Haven't to connect...`: Expected. Device has no Wi-Fi credentials yet. BLE pairing works without it.
-- `W comm: pin-code not found in fctry NVS...`: OK for development. Code falls back to hardcoded default.
-- `chip[DMG]: DefaultAclStorage: 0 entries loaded`: Expected for uncommissioned device.
-- `chip[SVR]: WARNING: mTestEventTriggerDelegate is null`: Expected. Test delegate isn't used.
-
-**Critical (Action Required)**:
-- `E chip[SVR]: ERROR setting up transport: 2d`: **BLOCKER**. SPAKE2p verifier missing or invalid.
-- `Chip stack locking error` / `chipDie`: **BLOCKER**. Threading violation. See solution above.
-- `Fabric already commissioned`: Device in operational mode. Erase NVS to enable commissioning.
-
-### Recovery Procedure for Failed Commissioning
-
-When commissioning fails, follow this sequence:
-
-```bash
-# 1. Start from known-good firmware
-cd firmware
-
-# 2. Clean, build, and flash application
-idf.py fullclean && idf.py build && idf.py -p /dev/tty.usbmodem101 flash
-
-# 3. CRITICAL: Erase regular NVS to clear old pairings/fabrics
-python -m esptool --chip esp32c3 -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
-
-# 4. Reset device, monitor output, and pair with Apple Home
-# Monitor should show "CHIPoBLE advertising started"
-idf.py -p /dev/tty.usbmodem101 monitor
-```
-
-### Complete Flash Sequence for Unique QR Codes
-
-To flash a device with unique factory credentials:
-
-1. **Start with known-good baseline** that pairs successfully
-2. **Generate complete factory NVS binary** using `esp-matter-mfg-tool` with unique passcode/discriminator
-3. **Add `pin-code` to factory CSV** (see QR Code Issue Resolution section)
-4. **Perform full flash sequence**:
-   ```bash
-   # Flash firmware
-   idf.py -p /dev/tty.usbmodem101 flash
-   
-   # Flash factory partition to correct address
-   esptool.py -p /dev/tty.usbmodem101 write_flash 0x3E0000 factory-partition.bin
-   
-   # Erase operational NVS
-   esptool.py -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
-   
-   # CRITICAL: Reboot device to load new credentials
-   esptool.py -p /dev/tty.usbmodem101 run
-   ```
-5. **Reboot and pair** - device should advertise new unique credentials
-
-### "Accessory Not Found" Immediately After Flashing
-
-**Symptom**: After flashing new factory partition, Apple Home shows "Accessory Not Found" on first pairing attempt.
-
-**Cause**: Device didn't automatically reboot after flashing, so it's still advertising old credentials (or not advertising at all).
-
-**Solution**: Explicitly reboot the device after flashing:
-```bash
-esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
-```
-
-Or start monitoring (which automatically resets the device):
-```bash
-idf.py -p /dev/tty.usbmodem101 monitor
-```
-
-### CASE Errors After Removing Device from Apple Home
-
-**Symptom**: After removing device from Apple Home, serial logs show repeated errors:
-```
-E chip[SC]: CASE failed to match destination ID with local fabrics
-E chip[IN]: CASE Session establishment failed: 10
-```
-
-**Cause**: iOS still has the device cached in its local Matter controller database and periodically tries to reconnect. The device correctly rejects these attempts because the fabric was erased.
-
-**This is NORMAL and EXPECTED!**
-- The device is correctly rejecting unauthorized connection attempts
-- iOS will eventually stop trying as its cache expires
-- The errors don't affect device functionality or new pairings
-- This proves the security system is working correctly
-
-**No action required** - these errors will stop on their own
 
 ---
 
