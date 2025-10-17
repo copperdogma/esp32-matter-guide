@@ -343,6 +343,11 @@ chip-cert gen-att-cert --type d --subject-cn "Matter DAC" --subject-vid 0x131B -
 chip-cert gen-cd --key PAA_key.pem --cert PAA_cert.pem --out CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330001-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
 
 # Generate factory partition
+# ⚠️ CRITICAL: The QR code is derived from passcode + discriminator
+# If building MULTIPLE devices, use UNIQUE values for each device:
+#   - Passcode range: 00000001-99999998 (avoid patterns like 12345678)
+#   - Discriminator range: 0x000-0xFFF (0-4095 decimal)
+# Using the same values will create identical QR codes!
 esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF00 --dac-cert DAC_cert.pem --dac-key DAC_key.pem --pai --cert PAI_cert.pem --key PAI_key.pem --cert-dclrn CD.der --outdir .
 ```
 
@@ -354,6 +359,8 @@ ls -la 131b_1234/
 UUID="<your-uuid-from-above>"  # Replace with actual UUID from ls output
 
 # Add pin-code to factory partition CSV using sed
+# ⚠️ IMPORTANT: The pin-code value MUST match the --passcode from Step 4
+# Default example uses 20202021 - change this if you used a different passcode
 sed -i.bak '/discriminator,data,u32,/a\
 pin-code,data,u32,20202021' 131b_1234/$UUID/internal/partition.csv
 
