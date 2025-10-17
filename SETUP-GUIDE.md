@@ -834,6 +834,129 @@ patch -p1 < /path/to/esp32-matter-guide/patches/esp32-factory-data-provider-gets
 
 ---
 
+## Troubleshooting Common Issues
+
+### "Accessory Not Found" with Fabric Already Commissioned
+
+**Symptom**: Apple Home shows "Accessory Not Found" and serial logs show `Fabric already commissioned. Disabling BLE advertisement`.
+
+**Cause**: The device believes it's already paired to a fabric and won't enter BLE commissioning mode.
+
+**Solution**: You **must** erase the regular NVS partition to clear stored fabrics. The 10s button press for factory reset can be unreliable.
+
+```bash
+# Erase NVS partition (most reliable method)
+python -m esptool --chip esp32c3 -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
+
+# Or using parttool
+python $IDF_PATH/components/partition_table/parttool.py \
+  --port /dev/tty.usbmodem101 \
+  erase_partition --partition-name=nvs
+
+# Or from device console
+matter esp factoryreset
+```
+
+After erasure, reboot the device. It should now enter commissioning mode and advertise via BLE.
+
+### "ERROR setting up transport: 2d"
+
+**Symptom**: "Accessory Not Found" and serial logs show `E chip[SVR]: ERROR setting up transport: 2d`.
+
+**Cause**: A custom `CommissionableDataProvider` was introduced but failed to provide a valid **SPAKE2p verifier**. The `CommissioningWindowManager` requires this to set up the PASE session and fails before starting BLE advertising.
+
+**Solution**: The custom provider's `GetSpake2pVerifier` method must be implemented using `PASESession::GeneratePASEVerifier()` from the passcode, salt, and iteration count. See the QR Code Issue Resolution section for the complete fix.
+
+### Chip Stack Locking Error / Panic
+
+**Symptom**: Crash with `E (xxx) chip[DL]: Chip stack locking error at 'SystemLayerImplFreeRTOS.cpp:55'` or `AssertChipStackLockedByCurrentThread` panic/reboot loop.
+
+**Cause**: A Matter API was called from a task other than the main CHIP thread without acquiring the stack lock (e.g., from ISR, GPIO callback, or non-Matter thread).
+
+**Solution**:
+1. Wrap all custom provider methods with `chip::DeviceLayer::StackLock lock;`
+2. Open commissioning window by scheduling on CHIP thread:
+   ```cpp
+   chip::DeviceLayer::PlatformMgr().ScheduleWork(open_commissioning_window_deferred);
+   ```
+3. Use `ScheduleWork()` for any Matter API calls from non-Matter threads
+
+### Device Advertises Old/Default QR Code
+
+**Symptom**: Device advertises an old/default QR code despite flashing new factory data.
+
+**Causes**:
+- Factory NVS binary flashed to wrong memory address (e.g., regular `nvs` partition instead of `fctry` partition)
+- `sdkconfig` not configured to read from factory partition (`CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL`)
+
+**Solution**:
+1. Verify the `fctry` partition offset in `partitions.csv` (e.g., `0x3E0000`)
+2. Use that exact address in `esptool.py write_flash` command
+3. Ensure `sdkconfig` points to correct partition label: `CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="fctry"`
+
+### Interpreting Serial Output Anomalies
+
+**Benign (Safe to Ignore)**:
+- `Warning: Checksum mismatch...`: Flashed app is older than last build. Re-flash if needed.
+- `E esp_matter_cluster: Config is NULL...`: Optional config pointer is null. Doesn't affect commissioning.
+- `W wifi: Haven't to connect...`: Expected. Device has no Wi-Fi credentials yet. BLE pairing works without it.
+- `W comm: pin-code not found in fctry NVS...`: OK for development. Code falls back to hardcoded default.
+- `chip[DMG]: DefaultAclStorage: 0 entries loaded`: Expected for uncommissioned device.
+- `chip[SVR]: WARNING: mTestEventTriggerDelegate is null`: Expected. Test delegate isn't used.
+
+**Critical (Action Required)**:
+- `E chip[SVR]: ERROR setting up transport: 2d`: **BLOCKER**. SPAKE2p verifier missing or invalid.
+- `Chip stack locking error` / `chipDie`: **BLOCKER**. Threading violation. See solution above.
+- `Fabric already commissioned`: Device in operational mode. Erase NVS to enable commissioning.
+
+### Recovery Procedure for Failed Commissioning
+
+When commissioning fails, follow this sequence:
+
+```bash
+# 1. Start from known-good firmware
+cd firmware
+
+# 2. Clean, build, and flash application
+idf.py fullclean && idf.py build && idf.py -p /dev/tty.usbmodem101 flash
+
+# 3. CRITICAL: Erase regular NVS to clear old pairings/fabrics
+python -m esptool --chip esp32c3 -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
+
+# 4. Reset device, monitor output, and pair with Apple Home
+# Monitor should show "CHIPoBLE advertising started"
+idf.py -p /dev/tty.usbmodem101 monitor
+```
+
+### Complete Flash Sequence for Unique QR Codes
+
+To flash a device with unique factory credentials:
+
+1. **Start with known-good baseline** that pairs successfully
+2. **Generate complete factory NVS binary** using `esp-matter-mfg-tool` with unique passcode/discriminator
+3. **Add `pin-code` to factory CSV** (see QR Code Issue Resolution section)
+4. **Perform full flash sequence**:
+   ```bash
+   # Flash firmware
+   idf.py -p /dev/tty.usbmodem101 flash
+   
+   # Flash factory partition to correct address
+   esptool.py -p /dev/tty.usbmodem101 write_flash 0x3E0000 factory-partition.bin
+   
+   # Erase operational NVS
+   esptool.py -p /dev/tty.usbmodem101 erase_region 0x10000 0xC000
+   ```
+5. **Reboot and pair** - device should advertise new unique credentials
+
+---
+
+## Additional Resources
+
+For deeper technical understanding of Matter protocol, commissioning flows, and Apple Home integration, see:
+- **[docs/MATTER-TECHNICAL-GUIDE.md](docs/MATTER-TECHNICAL-GUIDE.md)** - Comprehensive Matter fundamentals, PASE/CASE protocols, and advanced debugging
+
+---
+
 ## Notes on esp32-matter-guide.md
 
 *[Corrections and updates to the reference guide will be noted here]*
