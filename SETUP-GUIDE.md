@@ -74,7 +74,7 @@ idf.py -p /dev/tty.usbmodem101 monitor
 ```bash
 # Human (interactive) monitoring only
 # First setup environment, then navigate to project, then monitor
-cd ~/esp/esp-idf && source ./export.sh && cd ~/esp/esp-matter && source ./export.sh && cd ~/path/to/your/firmware
+source ~/esp/esp-idf/export.sh && source ~/esp/esp-matter/export.sh
 idf.py -p /dev/tty.usbmodem101 monitor
 ```
 
@@ -436,6 +436,51 @@ fi
 5. Test the occupancy sensor by waving your hand in front of the PIR sensor
 
 **Success!** Your device should now appear in Apple Home and respond to motion detection.
+
+---
+
+## AI Testing/Fixing Loop
+
+**🤖 For AI Agents**: After completing the setup, always perform this testing loop to verify the device is working correctly and fix any issues.
+
+### Quick Test Command
+```bash
+# Capture device output with 30-second timeout
+python3 scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_test.txt -d 30
+
+# Check for success indicators
+grep -E "SetupQRCode|Manual pairing code|CHIPoBLE|Created.*endpoint.*ID:" boot_test.txt
+
+# Check for errors
+grep -E "ERROR|Error|error|abort|crash|failed|Failed" boot_test.txt
+```
+
+### Common Issues and Fixes
+
+**Issue**: `Dynamic endpoint count cannot be greater than CONFIG_ESP_MATTER_MAX_DYNAMIC_ENDPOINT_COUNT`
+- **Fix**: Increase `CONFIG_ESP_MATTER_MAX_DYNAMIC_ENDPOINT_COUNT` in `sdkconfig` to accommodate all endpoints
+- **Rule**: Need `N+1` where N = number of dynamic endpoints (endpoint 0 is reserved for root)
+
+**Issue**: Device crashes during endpoint creation
+- **Fix**: Check endpoint count configuration and rebuild with `idf.py reconfigure && idf.py build`
+
+**Issue**: No QR code generated
+- **Fix**: Ensure factory partition is flashed and device has proper credentials
+
+### Testing Loop Process
+1. **Capture**: Run boot capture script
+2. **Analyze**: Check for errors and success indicators
+3. **Fix**: Address any issues found
+4. **Rebuild**: `idf.py reconfigure && idf.py build`
+5. **Flash**: `idf.py -p /dev/cu.usbmodem101 flash`
+6. **Verify**: Re-run capture to confirm fix
+7. **Repeat**: Until device boots cleanly with QR code
+
+**Expected Success Output**:
+- All endpoints created successfully (IDs 1-N)
+- QR code generated: `SetupQRCode: [MT:...]`
+- Manual pairing code: `Manual pairing code: [XXXXXXXXXXX]`
+- No crash/abort errors
 
 ---
 
