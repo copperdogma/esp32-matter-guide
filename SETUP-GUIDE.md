@@ -1,7 +1,7 @@
 # ESP32-C3 Matter Occupancy Sensor Setup Guide
 
 **Last Updated**: October 17, 2025  
-**Status**: Complete and Verified  
+**Status**: Complete and Verified using Claude 4.5 Sonnet to execute the commands.
 **Goal**: Set up ESP32-C3 as a Matter-compatible device that can be reliably commissioned to Apple Home with unique, changeable credentials.
 
 **Tested Hardware**:
@@ -19,22 +19,6 @@
 - Comprehensive troubleshooting for common issues
 
 **📝 macOS Serial Port Note**: On macOS, use `/dev/cu.usbmodem101` for flashing/writing (esptool) and `/dev/tty.usbmodem101` for monitoring (idf.py monitor). The `cu` (call-up) device allows non-blocking writes, while `tty` is for terminal interaction.
-
----
-
-## ✅ SUCCESS SUMMARY (October 17, 2025)
-
-The ESP32-C3 Matter occupancy sensor is now **fully functional** with unique credentials:
-
-- **Status**: ✅ Firmware builds, flashes, and boots successfully
-- **QR Code**: `MT:Y.K90GSY00KA0648G00` ✅ PRINTING
-- **Manual Code**: `34970112332` ✅ PRINTING
-- **BLE Commissioning**: ✅ Active
-- **PIR Sensor**: ✅ Working on GPIO 3
-- **Commissioned**: ✅ Successfully added to Apple Home
-- **Tested**: ✅ PIR sensor detects occupancy in Home app
-
-**Key Fix Applied**: Patched ESP32FactoryDataProvider to implement `GetSetupPasscode()` and added `pin-code` to factory NVS partition. See [Known Issue: QR Code Not Printing](#known-issue-qr-code-not-printing-getsetuppasscode-bug) for details.
 
 ---
 
@@ -65,18 +49,18 @@ idf.py -p /dev/cu.usbmodem101 flash
 
 # Flash factory partition with credentials (after generating)
 # Replace <UUID> with your actual UUID from 131b_1234/ directory
-esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/<UUID>/<UUID>-partition.bin
+esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/<UUID>/partition_fixed.bin
 ```
 
 ### Using the Template Firmware
 **Location**: `templates/occupancy-sensor/` - Minimal working PIR occupancy sensor firmware (can adapt to any device type)
 
 ```bash
-# From repository root directory
+# From project root directory
 cp -r ~/esp/esp-matter/examples/sensors ./firmware
 cd firmware
-cp ../templates/occupancy-sensor/app_main.cpp main/
-cp ../templates/occupancy-sensor/drivers/pir.* main/drivers/
+cp $PROJECT_ROOT/templates/occupancy-sensor/app_main.cpp main/
+cp $PROJECT_ROOT/templates/occupancy-sensor/drivers/pir.* main/drivers/
 
 # Build and flash
 idf.py set-target esp32c3 && idf.py build
@@ -98,16 +82,26 @@ idf.py -p /dev/tty.usbmodem101 monitor
 ```bash
 # Use the provided boot capture script (requires pyserial: pip install pyserial)
 # This automatically resets the device and captures ~12 seconds of serial output
-$REPO_ROOT/scripts/capture_boot.py
+$PROJECT_ROOT/scripts/capture_boot.py
 
 # Or with custom options:
-$REPO_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture.txt -d 15
+$PROJECT_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture.txt -d 15
 
 # Inspect captured log
 head -200 boot_capture.txt
 
 # Get help on all options
-$REPO_ROOT/scripts/capture_boot.py --help
+$PROJECT_ROOT/scripts/capture_boot.py --help
+```
+
+**🤖 AI Note**: When providing setup summaries, always include the QR code HTTP link:
+```bash
+# Extract QR code and generate HTTP link for AI summary
+QR_CODE=$(grep "SetupQRCode:" boot_capture.txt | sed 's/.*\[\(.*\)\].*/\1/')
+if [ ! -z "$QR_CODE" ]; then
+    echo "QR Code: $QR_CODE"
+    echo "QR Code URL: https://project-chip.github.io/connectedhomeip/qrcode.html?data=$(echo $QR_CODE | sed 's/:/%3A/g')"
+fi
 ```
 
 **Features:**
@@ -150,10 +144,10 @@ fi
 ```
 
 **Fix** (if bug exists):
-1. Apply patch (from repository root): `cd ~/esp/esp-matter && patch -p1 < $REPO_ROOT/patches/esp32-factory-data-provider-getsetuppasscode.patch`
+1. Apply patch (from project root): `cd ~/esp/esp-matter && patch -p1 < $PROJECT_ROOT/patches/esp32-factory-data-provider-getsetuppasscode.patch`
 2. After running `esp-matter-mfg-tool`, edit `131b_1234/<UUID>/internal/partition.csv` and add:
    ```
-   pin-code,data,u32,20202021
+   pin-code,data,u32,<your-passcode>
    ```
    (right after the `discriminator` line, using your actual passcode)
 3. Regenerate partition: `python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate partition.csv partition_fixed.bin 0x6000`
@@ -163,6 +157,15 @@ fi
 
 ### 4. Generate Credentials (Complete Workflow)
 ```bash
+# Generate random unique values for this device
+PASSCODE=$(shuf -i 10000000-99999999 -n 1)
+DISCRIMINATOR=0x$(printf "%03X" $((RANDOM % 4096)))
+CERT_ID="ZIG20142ZB330$(printf "%03d" $((RANDOM % 1000)))-24"
+echo "Generated unique credentials:"
+echo "  Passcode: $PASSCODE"
+echo "  Discriminator: $DISCRIMINATOR"
+echo "  Certificate ID: $CERT_ID"
+
 # Generate PAA certificate
 chip-cert gen-att-cert --type a --subject-cn "ESP32-C3 Matter PAA" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key ESP32_C3_Matter_PAA_key.pem --out ESP32_C3_Matter_PAA_cert.pem
 
@@ -172,11 +175,11 @@ chip-cert gen-att-cert --type i --subject-cn "ESP32-C3 Matter PAI" --subject-vid
 # Generate DAC certificate
 chip-cert gen-att-cert --type d --subject-cn "ESP32-C3 Matter DAC" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAI_key.pem --ca-cert ESP32_C3_Matter_PAI_cert.pem --out-key ESP32_C3_Matter_DAC_key.pem --out ESP32_C3_Matter_DAC_cert.pem
 
-# Generate Certification Declaration (NOTE: Use proper certificate ID format)
-chip-cert gen-cd --key ESP32_C3_Matter_PAA_key.pem --cert ESP32_C3_Matter_PAA_cert.pem --out ESP32_C3_Matter_CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330001-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
+# Generate Certification Declaration
+chip-cert gen-cd --key ESP32_C3_Matter_PAA_key.pem --cert ESP32_C3_Matter_PAA_cert.pem --out ESP32_C3_Matter_CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "$CERT_ID" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
 
-# Generate factory partition (NOTE: Use correct parameter names)
-esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 20202021 --discriminator 0xF00 --dac-cert ESP32_C3_Matter_DAC_cert.pem --dac-key ESP32_C3_Matter_DAC_key.pem --pai --cert ESP32_C3_Matter_PAI_cert.pem --key ESP32_C3_Matter_PAI_key.pem --cert-dclrn ESP32_C3_Matter_CD.der --outdir .
+# Generate factory partition with unique credentials
+esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode $PASSCODE --discriminator $DISCRIMINATOR --dac-cert ESP32_C3_Matter_DAC_cert.pem --dac-key ESP32_C3_Matter_DAC_key.pem --pai --cert ESP32_C3_Matter_PAI_cert.pem --key ESP32_C3_Matter_PAI_key.pem --cert-dclrn ESP32_C3_Matter_CD.der --lifetime 2000 --outdir .
 ```
 
 ### 5. Change Device QR Code (Quick Reference)
@@ -206,20 +209,25 @@ This section provides a clean, linear path from zero to a working Matter device.
 - ESP32-C3 development board connected via USB
 - Basic familiarity with terminal/command line
 
-### Step 0: Clone This Guide Repository
+### Step 0: Set Up Project Directory
 
-**Important**: Clone this repository first to access patches and templates:
+**Option A - New Setup**: Clone this repository first to access patches and templates:
 
 ```bash
 cd ~/Documents  # or wherever you keep projects
 git clone https://github.com/copperdogma/esp32-matter-guide.git
 cd esp32-matter-guide
-
-# Save the repository root path for later use
-REPO_ROOT=$(pwd)
+PROJECT_ROOT=$(pwd)
 ```
 
-**📁 Directory Structure**: All commands in this guide assume you're working from the repository root. Your firmware project will be created in `firmware/` subdirectory, which keeps all project files, credentials, and build artifacts organized in one place.
+**Option B - Existing Project**: If you already have a project with templates and patches:
+
+```bash
+cd ~/path/to/your/project  # e.g., ~/Documents/Projects/death-matter-controller
+PROJECT_ROOT=$(pwd)
+```
+
+**📁 Directory Structure**: All commands in this guide assume you're working from the project root (`$PROJECT_ROOT`). Your firmware project will be created in `firmware/` subdirectory, which keeps all project files, credentials, and build artifacts organized in one place.
 
 ### Step 1: Install ESP-IDF and ESP-Matter
 
@@ -262,12 +270,12 @@ pip3 install --break-system-packages -r connectedhomeip/connectedhomeip/scripts/
 ### Step 2: Check and Apply Upstream Patches
 
 ```bash
-# From the repository root (esp32-matter-guide directory)
+# From the project root directory
 # Check if the GetSetupPasscode bug exists
 if grep "GetSetupPasscode.*override" ~/esp/esp-matter/connectedhomeip/connectedhomeip/src/platform/ESP32/ESP32FactoryDataProvider.h | grep -q "CHIP_ERROR_NOT_IMPLEMENTED"; then
     echo "⚠️  Bug exists - applying patch..."
     cd ~/esp/esp-matter
-    patch -p1 < patches/esp32-factory-data-provider-getsetuppasscode.patch
+    patch -p1 < $PROJECT_ROOT/patches/esp32-factory-data-provider-getsetuppasscode.patch
     cd -  # Return to previous directory
     echo "✅ Patch applied successfully"
 else
@@ -283,17 +291,17 @@ cd ~/esp/esp-idf && source ./export.sh
 cd ~/esp/esp-matter && source ./export.sh
 export IDF_CCACHE_ENABLE=1
 
-# Navigate to repository root
-cd $REPO_ROOT
+# Navigate to project root
+cd $PROJECT_ROOT
 
 # Copy the sensors example from ESP-Matter (includes build infrastructure)
-# This creates the firmware folder INSIDE your repository
+# This creates the firmware folder INSIDE your project
 cp -r ~/esp/esp-matter/examples/sensors ./firmware
 cd firmware
 
 # Replace with template files (occupancy-only, no I2C conflicts)
-cp ../templates/occupancy-sensor/app_main.cpp main/
-cp ../templates/occupancy-sensor/drivers/pir.* main/drivers/
+cp $PROJECT_ROOT/templates/occupancy-sensor/app_main.cpp main/
+cp $PROJECT_ROOT/templates/occupancy-sensor/drivers/pir.* main/drivers/
 
 # Configure for ESP32-C3
 idf.py set-target esp32c3
@@ -333,6 +341,15 @@ idf.py reconfigure
 ### Step 4: Generate Unique Device Credentials
 
 ```bash
+# Generate random unique values for this device
+PASSCODE=$(shuf -i 10000000-99999999 -n 1)
+DISCRIMINATOR=0x$(printf "%03X" $((RANDOM % 4096)))
+CERT_ID="ZIG20142ZB330$(printf "%03d" $((RANDOM % 1000)))-24"
+echo "Generated unique credentials:"
+echo "  Passcode: $PASSCODE"
+echo "  Discriminator: $DISCRIMINATOR"
+echo "  Certificate ID: $CERT_ID"
+
 # Generate certificate chain
 chip-cert gen-att-cert --type a --subject-cn "Matter PAA" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key PAA_key.pem --out PAA_cert.pem
 
@@ -340,26 +357,10 @@ chip-cert gen-att-cert --type i --subject-cn "Matter PAI" --subject-vid 0x131B -
 
 chip-cert gen-att-cert --type d --subject-cn "Matter DAC" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key PAI_key.pem --ca-cert PAI_cert.pem --out-key DAC_key.pem --out DAC_cert.pem
 
-chip-cert gen-cd --key PAA_key.pem --cert PAA_cert.pem --out CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330001-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
+chip-cert gen-cd --key PAA_key.pem --cert PAA_cert.pem --out CD.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "$CERT_ID" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
 
-# Generate factory partition
-# ⚠️ CRITICAL: Choose UNIQUE passcode and discriminator for THIS device!
-# The QR code is derived from these values - using the same values creates duplicate QR codes.
-# 
-# CHOOSE YOUR OWN VALUES (don't use these examples as-is):
-#   Passcode: Pick a random 8-digit number (00000001-99999998, avoid patterns)
-#   Discriminator: Pick a random hex value (0x000-0xFFF / 0-4095 decimal)
-#
-# Examples for different devices:
-#   Device 1: --passcode 20202021 --discriminator 0xF00
-#   Device 2: --passcode 34567890 --discriminator 0x800
-#   Device 3: --passcode 87654321 --discriminator 0x123
-#
-# Replace the values below with YOUR chosen values:
-PASSCODE=20202021      # ⚠️ CHANGE THIS to your unique 8-digit number
-DISCRIMINATOR=0xF00    # ⚠️ CHANGE THIS to your unique hex value
-
-esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode $PASSCODE --discriminator $DISCRIMINATOR --dac-cert DAC_cert.pem --dac-key DAC_key.pem --pai --cert PAI_cert.pem --key PAI_key.pem --cert-dclrn CD.der --outdir .
+# Generate factory partition with unique credentials
+esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode $PASSCODE --discriminator $DISCRIMINATOR --dac-cert DAC_cert.pem --dac-key DAC_key.pem --pai --cert PAI_cert.pem --key PAI_key.pem --cert-dclrn CD.der --lifetime 2000 --outdir .
 ```
 
 ### Step 5: Add pin-code to Factory Partition
@@ -401,31 +402,36 @@ esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/
 esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
 ```
 
-### Step 7: Verify QR Code
+### Step 7: Verify Device Commissioning
 
 ```bash
-# Method 1: Automated capture (recommended for AI agents and automation)
-$REPO_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture.txt -d 15
+# Capture boot log to verify QR code generation
+$PROJECT_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture.txt -d 15
 
-# Verify QR code and commissioning info in captured log
+# Check for QR code and commissioning info
 grep -A 3 "SetupQRCode\|Manual pairing code\|CHIPoBLE advertising" boot_capture.txt
 
-# Expected output:
-# I (xxxx) chip[SVR]: SetupQRCode: [MT:Y.K90GSY00KA0648G00]
-# I (xxxx) chip[SVR]: Manual pairing code: [34970112332]
+# Expected output shows your unique QR code and manual pairing code
+# Example:
+# I (xxxx) chip[SVR]: SetupQRCode: [MT:Y.XXXXXXXXXXXXXXX]
+# I (xxxx) chip[SVR]: Copy/paste the below URL in a browser to see the QR Code:
+# I (xxxx) chip[SVR]: https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.XXXXXXXXXXXXXXX
+# I (xxxx) chip[SVR]: Manual pairing code: [XXXXXXXXXXX]
 # I (xxxx) chip[DL]: CHIPoBLE advertising started
 
-# Method 2: Interactive monitor (HUMANS ONLY - requires TTY)
-# AI agents cannot use interactive tools, so use Method 1 instead
-# If you're a human and want live monitoring:
-#   idf.py -p /dev/tty.usbmodem101 monitor
+# Extract QR code for HTTP link generation
+QR_CODE=$(grep "SetupQRCode:" boot_capture.txt | sed 's/.*\[\(.*\)\].*/\1/')
+if [ ! -z "$QR_CODE" ]; then
+    echo "QR Code: $QR_CODE"
+    echo "QR Code URL: https://project-chip.github.io/connectedhomeip/qrcode.html?data=$(echo $QR_CODE | sed 's/:/%3A/g')"
+fi
 ```
 
 ### Step 8: Commission to Apple Home
 
 1. Open Apple Home app on iPhone/iPad
 2. Tap "+" → "Add Accessory"
-3. Scan the QR code from serial output, or enter manual pairing code
+3. Scan the QR code from boot log, or enter manual pairing code
 4. Follow prompts to complete setup
 5. Test the occupancy sensor by waving your hand in front of the PIR sensor
 
@@ -568,7 +574,7 @@ If commissioning completely fails:
 esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 erase_flash
 
 # 2. Rebuild and flash everything
-cd $REPO_ROOT/firmware
+cd $PROJECT_ROOT/firmware
 idf.py fullclean
 idf.py build
 idf.py -p /dev/cu.usbmodem101 flash
@@ -595,12 +601,18 @@ This section documents the complete, tested process for changing a device's QR c
 **Step 1: Remove device from Apple Home** (if currently paired)
 - Open Apple Home app → Select device → Remove Accessory
 
-**Step 2: Generate new certificate chain**
+**Step 2: Generate new unique credentials**
 ```bash
-# Navigate to your firmware directory inside the repository
-cd $REPO_ROOT/firmware
+# Navigate to your firmware directory
+cd $PROJECT_ROOT/firmware
 
-# Generate PAA (Product Attestation Authority)
+# Generate new random values
+PASSCODE=$(shuf -i 10000000-99999999 -n 1)
+DISCRIMINATOR=0x$(printf "%03X" $((RANDOM % 4096)))
+CERT_ID="ZIG20142ZB330$(printf "%03d" $((RANDOM % 1000)))-24"
+echo "New credentials: Passcode=$PASSCODE, Discriminator=$DISCRIMINATOR, CertID=$CERT_ID"
+
+# Generate certificate chain with new values
 chip-cert gen-att-cert --type a --subject-cn "ESP32-C3 Matter PAA v3" --valid-from "2024-01-01 00:00:00" --lifetime 3650 --out-key ESP32_C3_Matter_PAA_v3_key.pem --out ESP32_C3_Matter_PAA_v3_cert.pem
 
 # Generate PAI (Product Attestation Intermediate)
@@ -609,40 +621,29 @@ chip-cert gen-att-cert --type i --subject-cn "ESP32-C3 Matter PAI v3" --subject-
 # Generate DAC (Device Attestation Certificate)
 chip-cert gen-att-cert --type d --subject-cn "ESP32-C3 Matter DAC v3" --subject-vid 0x131B --subject-pid 0x1234 --valid-from "2024-01-01 00:00:00" --lifetime 3650 --ca-key ESP32_C3_Matter_PAI_v3_key.pem --ca-cert ESP32_C3_Matter_PAI_v3_cert.pem --out-key ESP32_C3_Matter_DAC_v3_key.pem --out ESP32_C3_Matter_DAC_v3_cert.pem
 
-# Generate CD (Certification Declaration)
-chip-cert gen-cd --key ESP32_C3_Matter_PAA_v3_key.pem --cert ESP32_C3_Matter_PAA_v3_cert.pem --out ESP32_C3_Matter_CD_v3.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "ZIG20142ZB330003-24" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
+chip-cert gen-cd --key ESP32_C3_Matter_PAA_v3_key.pem --cert ESP32_C3_Matter_PAA_v3_cert.pem --out ESP32_C3_Matter_CD_v3.der --format-version 1 --vendor-id 0x131B --product-id 0x1234 --device-type-id 0x0107 --certificate-id "$CERT_ID" --security-level 0 --security-info 0 --version-number 1 --certification-type 0
+
+# Generate factory partition with new credentials
+esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode $PASSCODE --discriminator $DISCRIMINATOR --dac-cert ESP32_C3_Matter_DAC_v3_cert.pem --dac-key ESP32_C3_Matter_DAC_v3_key.pem --pai --cert ESP32_C3_Matter_PAI_v3_cert.pem --key ESP32_C3_Matter_PAI_v3_key.pem --cert-dclrn ESP32_C3_Matter_CD_v3.der --lifetime 2000 --outdir .
 ```
 
-**Step 3: Generate factory partition with NEW credentials**
-```bash
-# Use different passcode and discriminator to ensure QR code is unique
-# Valid passcode range: avoid sequential/repetitive patterns
-# Discriminator range: 0x000 to 0xFFF (0-4095)
-
-esp-matter-mfg-tool -v 0x131B -p 0x1234 --passcode 34567890 --discriminator 0x800 --dac-cert ESP32_C3_Matter_DAC_v3_cert.pem --dac-key ESP32_C3_Matter_DAC_v3_key.pem --pai --cert ESP32_C3_Matter_PAI_v3_cert.pem --key ESP32_C3_Matter_PAI_v3_key.pem --cert-dclrn ESP32_C3_Matter_CD_v3.der --outdir .
-```
-
-**Step 4: Add pin-code to factory CSV**
+**Step 3: Add pin-code to factory CSV**
 ```bash
 # Locate the generated UUID directory
 ls -la 131b_1234/
 
-# Edit the partition CSV (replace UUID with your actual UUID)
-# Add this line after discriminator:
-# pin-code,data,u32,34567890
-
-# Example using sed:
+# Add pin-code using the same passcode from Step 2
 UUID="<your-uuid-here>"
 sed -i.bak '/discriminator,data,u32,/a\
-pin-code,data,u32,34567890' 131b_1234/$UUID/internal/partition.csv
+pin-code,data,u32,'"$PASSCODE" 131b_1234/$UUID/internal/partition.csv
 ```
 
-**Step 5: Regenerate factory partition binary**
+**Step 4: Regenerate factory partition binary**
 ```bash
 python $IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py generate 131b_1234/$UUID/internal/partition.csv 131b_1234/$UUID/partition_fixed.bin 0x6000
 ```
 
-**Step 6: Erase NVS, flash new partition, and reboot**
+**Step 5: Erase NVS, flash new partition, and reboot**
 ```bash
 # Erase operational NVS (clears old pairings)
 python -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 erase_region 0x10000 0xC000
@@ -650,62 +651,38 @@ python -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 erase_region 0x10000 0xC
 # Flash new factory partition
 esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 write_flash 0x3E0000 131b_1234/$UUID/partition_fixed.bin
 
-# CRITICAL: Reboot device to load new credentials
+# Reboot device to load new credentials
 esptool.py --chip esp32c3 -p /dev/cu.usbmodem101 run
 ```
 
-**Step 7: Verify new QR code**
+**Step 6: Verify new credentials**
 ```bash
-# Capture boot log
-python3 - << 'PY'
-import sys, time, serial
-port = '/dev/cu.usbmodem101'
-baud = 115200
-out_path = 'boot_capture_new.txt'
-ser = serial.Serial(port=port, baudrate=baud, timeout=0.1)
-ser.reset_input_buffer(); ser.reset_output_buffer()
-ser.dtr = False; ser.rts = False; time.sleep(0.05)
-ser.dtr = True; ser.rts = True
-end = time.time() + 12.0
-with open(out_path, 'wb') as f:
-    while time.time() < end:
-        data = ser.read(4096)
-        if data:
-            f.write(data); f.flush()
-        else:
-            time.sleep(0.02)
-ser.close()
-print('Wrote to', out_path)
-PY
-
-# Check QR code
+# Capture boot log to verify new QR code
+$PROJECT_ROOT/scripts/capture_boot.py -p /dev/cu.usbmodem101 -o boot_capture_new.txt -d 15
 grep -A 3 "SetupQRCode" boot_capture_new.txt
+
+# Extract and display QR code with HTTP link
+QR_CODE=$(grep "SetupQRCode:" boot_capture_new.txt | sed 's/.*\[\(.*\)\].*/\1/')
+if [ ! -z "$QR_CODE" ]; then
+    echo "New QR Code: $QR_CODE"
+    echo "QR Code URL: https://project-chip.github.io/connectedhomeip/qrcode.html?data=$(echo $QR_CODE | sed 's/:/%3A/g')"
+fi
 ```
 
-**Step 8: Re-commission to Apple Home**
+**Step 7: Re-commission to Apple Home**
 - Open Apple Home app → Add Accessory
 - Scan new QR code or enter manual pairing code
 - Verify device pairs successfully and responds to occupancy events
 
-### Verified Results (October 16, 2025)
+### Process Summary
 
-**Original Credentials:**
-- QR Code: `MT:Y.K90GSY00KA0648G00`
-- Manual Code: `34970112332`
-- Passcode: 20202021
-- Discriminator: 3840 (0xF00)
+This workflow generates completely unique credentials each time:
+- **Passcode**: Random 8-digit number (10,000,000 - 99,999,999)
+- **Discriminator**: Random hex value (0x000 - 0xFFF)
+- **Certificate ID**: Random 3-digit suffix (000-999)
+- **QR Code**: Automatically generated from unique values
 
-**New Credentials (v3):**
-- QR Code: `MT:Y.K90GSY00AJVH7SR00` ✅
-- Manual Code: `21403421094` ✅
-- Passcode: 34567890
-- Discriminator: 2048 (0x800)
-
-**Status**: ✅ COMPLETED & VERIFIED
-- Device successfully changed QR code
-- Device re-commissioned to Apple Home
-- PIR occupancy sensor functioning correctly
-- Process fully documented and tested
+**Result**: Each device gets a unique QR code and manual pairing code, preventing conflicts when commissioning multiple devices.
 
 ---
 
