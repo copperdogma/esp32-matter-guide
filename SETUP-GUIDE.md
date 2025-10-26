@@ -482,6 +482,32 @@ grep -E "ERROR|Error|error|abort|crash|failed|Failed" boot_test.txt
 - Manual pairing code: `Manual pairing code: [XXXXXXXXXXX]`
 - No crash/abort errors
 
+### Memory Allocation Errors (esp-aes)
+
+**Issue**: Device crashes with `esp-aes: Failed to allocate memory` during boot
+- **Cause**: Hardware AES acceleration requires memory allocation that can fail with limited heap
+- **Fix**: Disable hardware AES in `sdkconfig` to use software AES:
+  ```bash
+  cd firmware
+  # Edit sdkconfig to set:
+  # CONFIG_MBEDTLS_HARDWARE_AES is not set
+  idf.py reconfigure && idf.py build
+  idf.py -p /dev/cu.usbmodem101 flash
+  ```
+- **Note**: Software AES uses more CPU but avoids heap allocation issues
+
+### Factory Reset After Failed Commissioning
+
+**Issue**: Device crashes with `esp-aes: Failed to allocate memory` after attempting Home app pairing
+- **Cause**: Corrupted Matter commissioning data in NVS
+- **Fix**: Erase flash completely and re-flash firmware:
+  ```bash
+  cd firmware
+  idf.py -p /dev/cu.usbmodem101 erase-flash
+  idf.py -p /dev/cu.usbmodem101 flash
+  ```
+- **Note**: This regenerates fresh credentials and QR code
+
 ---
 
 ## Troubleshooting
